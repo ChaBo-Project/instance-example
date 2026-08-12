@@ -1,0 +1,43 @@
+name: Deploy <INSTANCE_NAME> instance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['orchestrator/**', 'qdrant/**', 'deploy.env']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: v
+        run: |
+          set -a; source deploy.env; set +a
+          {
+            echo "chabo_tag=$CHABO_TAG"
+            echo "orchestrator_space=$ORCHESTRATOR_HF_SPACE"
+            echo "qdrant_space=$QDRANT_HF_SPACE"
+          } >> "$GITHUB_OUTPUT"
+
+      # Pin lives in exactly these two `uses:` lines — bump both together to upgrade.
+      # v0.1.0-test is the only tag ChaBo-Deploy has cut so far; move to a real
+      # released version once one exists.
+      - name: Deploy orchestrator
+        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test
+        with:
+          component: orchestrator
+          hf_space: ${{ steps.v.outputs.orchestrator_space }}
+          image_tag: ${{ steps.v.outputs.chabo_tag }}
+          title: "Chabo Orchestrator — <INSTANCE_NAME>"
+          extra_content_path: orchestrator/instance_config
+          hf_token: ${{ secrets.HF_TOKEN }}
+
+      - name: Deploy qdrant
+        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test
+        with:
+          component: qdrant
+          hf_space: ${{ steps.v.outputs.qdrant_space }}
+          title: "Chabo Qdrant — <INSTANCE_NAME>"
+          hf_token: ${{ secrets.HF_TOKEN }}

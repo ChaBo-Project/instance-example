@@ -70,19 +70,40 @@ required.
 If the organization requires token approval, wait until an organization
 administrator approves the token.
 
-### 4. Add the token to GitHub Actions
+### 4. Add the tokens to GitHub Actions
 
 In the GitHub repository, open:
 
-`Settings → Secrets and variables → Actions → New repository secret`
+`Settings → Secrets and variables → Actions`
 
-Create:
+Create this required repository secret:
 
 - Name: `HF_TOKEN`
 - Value: the fine-grained Hugging Face token
 
-Never place the token in `deploy.env`, workflow files, README files, or committed
-configuration.
+The workflow uses `HF_TOKEN` to:
+
+- Push content to both Hugging Face Spaces
+- Configure the Orchestrator Space secrets
+- Configure the Qdrant Space variables and secrets
+- Call the configured Hugging Face inference resources
+
+The following GitHub Actions secrets are optional:
+
+- `QDRANT__SERVICE__API_KEY`
+- `DATASET_READ_TOKEN`
+
+When an optional secret is not configured, the workflow uses `HF_TOKEN` as its
+default value.
+
+If `HF_TOKEN` is used as `DATASET_READ_TOKEN`, it must have read access to the
+embeddings Dataset.
+
+For better separation of permissions, a dedicated read-only
+`DATASET_READ_TOKEN` can be used.
+
+Never place token values in `deploy.env`, workflow files, README files, or other
+committed configuration.
 
 ### 5. Complete the public deployment configuration
 
@@ -107,15 +128,24 @@ workflow combines it with `deploy.env` and generates the final
 
 Do not edit or commit a generated `params.override.cfg`.
 
-### 6. Configure the Qdrant Space manually
+### 6. Automatic Hugging Face Space configuration
 
-This step is not automated.
+The workflow automatically configures the required Hugging Face Space settings.
+They do not need to be entered manually in the Hugging Face Space interface.
 
-In the Qdrant Space, open:
+#### Orchestrator Space secrets
 
-`Settings → Variables and secrets`
+The workflow configures:
 
-Add these variables:
+- `HF_TOKEN`
+- `QDRANT_API_KEY`
+
+Both use the required GitHub Actions secret `HF_TOKEN`.
+
+#### Qdrant Space variables
+
+The workflow reads these public values from `deploy.env` and adds them to the
+Qdrant Space:
 
 - `EMBEDDING_DATASET`
 - `COLLECTION_NAME`
@@ -124,13 +154,23 @@ Add these variables:
 - `BATCH_SIZE`
 - `TOP_K`
 
-Add these secrets:
+Only these selected values are added to the Qdrant Space settings. The workflow
+does not submit all values from `deploy.env` to Hugging Face.
+
+#### Qdrant Space secrets
+
+The workflow configures:
 
 - `QDRANT__SERVICE__API_KEY`
 - `DATASET_READ_TOKEN`
 
-`DATASET_READ_TOKEN` must have read access to the embeddings Dataset. For better
-security, use a separate read-only token instead of the deployment token.
+For each secret:
+
+1. The workflow uses the matching optional GitHub Actions secret when it exists.
+2. Otherwise, the workflow uses `HF_TOKEN` as the fallback.
+
+Secret values are never stored in `deploy.env` and are not printed in the
+workflow logs.
 
 ### 7. Complete optional instance configuration manually
 
@@ -145,15 +185,26 @@ Edit `orchestrator/instance_config/instance.yaml` only when the instance needs:
 
 Leave optional sections empty or commented when they are not required.
 
-### 8. Run the deployment manually
+## What the deployment workflow automates
 
-This step is not automated.
+The `Deploy ChaBo instance` workflow performs these operations:
 
-Open:
+1. Validates the required public configuration and GitHub secret.
+2. Generates `params.override.cfg` from `deploy.env` and
+   `params.override.cfg.template`.
+3. Configures the Orchestrator Space secrets.
+4. Configures the selected Qdrant Space variables.
+5. Configures the Qdrant Space secrets, including fallback handling.
+6. Deploys the Orchestrator Space.
+7. Deploys the Qdrant Space.
 
-`GitHub → Actions → Deploy ChaBo instance → Run workflow`
+The following prerequisites remain manual:
 
-Review the validation output before allowing deployment to continue.
-
-A push to a branch configured in `.github/workflows/deploy.yml` can also trigger
-the workflow when one of the monitored deployment files changes.
+- Create or verify the embeddings Dataset.
+- Create both empty Docker Spaces.
+- Create the fine-grained Hugging Face token.
+- Add the token to GitHub Actions.
+- Complete the public values in `deploy.env`.
+- Optionally configure `instance.yaml`.
+- Start the workflow through GitHub Actions or merge the changes into a
+  configured deployment branch.

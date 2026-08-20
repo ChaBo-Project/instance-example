@@ -3,7 +3,8 @@ name: Deploy ChaBo instance
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - "main"
     paths:
       - "orchestrator/**"
       - "qdrant/**"

@@ -205,6 +205,46 @@ jobs:
           print("PASS: Orchestrator Space secrets configured.")
           PY
 
+      # Copy public Qdrant configuration from deploy.env to the Qdrant Space.
+      # Only variable names are printed; no secret values are displayed.
+      - name: Configure Qdrant Space variables
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["QDRANT_HF_SPACE"]
+
+          variable_names = (
+              "EMBEDDING_DATASET",
+              "COLLECTION_NAME",
+              "EMBEDDING_DIMENSION",
+              "VECTOR_COLUMN_NAME",
+              "BATCH_SIZE",
+              "TOP_K",
+          )
+
+          for variable_name in variable_names:
+              api.add_space_variable(
+                  repo_id=space,
+                  key=variable_name,
+                  value=os.environ[variable_name],
+              )
+              print(f"PASS: Configured Qdrant variable {variable_name}.")
+          PY
+
       # Both action references must be updated together when changing versions.
       - name: Deploy orchestrator
         uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test

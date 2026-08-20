@@ -61,12 +61,13 @@ TITLE_META_FIELDS = filename,page
 # instance.yaml.
 # Types: str, int, list.
 # filterable_fields = <field>:<type>,...
+filterable_fields =
 # llm_provider = huggingface
 # llm_model = provider-specific-model
 # llm_max_tokens = 256
 # llm_temperature = 0.1
 # llm_inference_provider = <required for huggingface>
-# llm_organization = <required for huggingface>
+# llm_organization = <required for huggingface
 
 [query_rewriter]
 # Set QUERY_REWRITER_ENABLED=false in deploy.env to disable this feature.

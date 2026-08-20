@@ -245,6 +245,61 @@ jobs:
               print(f"PASS: Configured Qdrant variable {variable_name}.")
           PY
 
+      # Configure Qdrant runtime secrets.
+      # Dedicated GitHub secrets are optional; HF_TOKEN is used as the fallback.
+      - name: Configure Qdrant Space secrets
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
+
+          # Optional overrides. Missing GitHub secrets become empty values.
+          QDRANT_SERVICE_API_KEY_OVERRIDE: ${{ secrets.QDRANT__SERVICE__API_KEY }}
+          DATASET_READ_TOKEN_OVERRIDE: ${{ secrets.DATASET_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$QDRANT_SERVICE_API_KEY_OVERRIDE" ]]; then
+            echo "INFO: Using dedicated QDRANT__SERVICE__API_KEY."
+          else
+            echo "INFO: QDRANT__SERVICE__API_KEY is not set; using HF_TOKEN."
+          fi
+
+          if [[ -n "$DATASET_READ_TOKEN_OVERRIDE" ]]; then
+            echo "INFO: Using dedicated DATASET_READ_TOKEN."
+          else
+            echo "INFO: DATASET_READ_TOKEN is not set; using HF_TOKEN."
+          fi
+
+          export QDRANT_SERVICE_API_KEY_VALUE="${QDRANT_SERVICE_API_KEY_OVERRIDE:-$HF_TOKEN}"
+          export DATASET_READ_TOKEN_VALUE="${DATASET_READ_TOKEN_OVERRIDE:-$HF_TOKEN}"
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["QDRANT_HF_SPACE"]
+
+          space_secrets = {
+              "QDRANT__SERVICE__API_KEY": os.environ[
+                  "QDRANT_SERVICE_API_KEY_VALUE"
+              ],
+              "DATASET_READ_TOKEN": os.environ[
+                  "DATASET_READ_TOKEN_VALUE"
+              ],
+          }
+
+          for secret_name, secret_value in space_secrets.items():
+              api.add_space_secret(
+                  repo_id=space,
+                  key=secret_name,
+                  value=secret_value,
+              )
+              print(f"PASS: Configured Qdrant secret {secret_name}.")
+          PY
+
       # Both action references must be updated together when changing versions.
       - name: Deploy orchestrator
         uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test

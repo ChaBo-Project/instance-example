@@ -169,6 +169,41 @@ jobs:
 
           echo "PASS: Orchestrator configuration rendered successfully."
 
+      # Configure runtime authentication without storing secret values in this repository.
+      # Hugging Face restarts the Space automatically when a secret is updated.
+      - name: Configure Orchestrator Space secrets
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          token = os.environ["HF_TOKEN"]
+          space = os.environ["ORCHESTRATOR_HF_SPACE"]
+          api = HfApi(token=token)
+
+          api.add_space_secret(
+              repo_id=space,
+              key="HF_TOKEN",
+              value=token,
+          )
+          api.add_space_secret(
+              repo_id=space,
+              key="QDRANT_API_KEY",
+              value=token,
+          )
+
+          print("PASS: Orchestrator Space secrets configured.")
+          PY
+
       # Both action references must be updated together when changing versions.
       - name: Deploy orchestrator
         uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test

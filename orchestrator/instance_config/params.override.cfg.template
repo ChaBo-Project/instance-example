@@ -1,4 +1,4 @@
-# Tier-1 pipeline-behavior overrides for the `<INSTANCE_NAME>` instance.
+# Tier-1 pipeline-behavior configuration template for a ChaBo instance.
 #
 # Layered on top of the published image's baked-in params.cfg via
 # configparser.read([base, override]) — only keys you uncomment/set here
@@ -15,23 +15,14 @@
 # never read by the running application, so it has no place in a deploy instance's config.
 
 [hf_endpoints]
-embedding_endpoint_url = <fill in>
-reranker_endpoint_url = <fill in>
-# For local TEI endpoints instead:
-# embedding_endpoint_url = http://tei-embedding:80
-# reranker_endpoint_url = http://tei-reranker:80
+embedding_endpoint_url = ${EMBEDDING_ENDPOINT_URL}
+reranker_endpoint_url = ${RERANKER_ENDPOINT_URL}
 
 [qdrant]
-# Modes: 'native' for direct QdrantClient, 'gradio' for Gradio Gateway access.
-# This topology (HF Spaces) deploys Qdrant as a Gradio-wrapped Space — use gradio.
 mode = gradio
-url = <fill in, e.g. https://myorg-myinstance-qdrant.hf.space>
-collection = <fill in>
+url = ${QDRANT_URL}
+collection = ${COLLECTION_NAME}
 port = 443
-# Optional TLS override. Leave commented to derive automatically.
-# https = false
-# NOTE: the api key for reaching this Space is set via this Space's own
-# QDRANT_API_KEY secret (reusing HF_TOKEN) — never committed here.
 
 [retrieval]
 # Optional — uncomment and adjust any of these to override the base defaults;
@@ -48,25 +39,20 @@ port = 443
 # rrf_k = 60
 
 [generator]
-PROVIDER = <fill in, e.g. huggingface, openai, anthropic, cohere, azure>
-MODEL = <fill in>
-MAX_TOKENS = 1024
-TEMPERATURE = 0.1
-# INFERENCE_PROVIDER = <required for provider huggingface>
-# ORGANIZATION = <required for provider huggingface>
-# CONTEXT_META_FIELDS = filename,project_id,document_source
+PROVIDER = ${GENERATOR_PROVIDER}
+MODEL = ${GENERATOR_MODEL}
+MAX_TOKENS = ${GENERATOR_MAX_TOKENS}
+TEMPERATURE = ${GENERATOR_TEMPERATURE}
+
+# These values are required when Hugging Face is the generator provider.
+INFERENCE_PROVIDER = ${GENERATOR_INFERENCE_PROVIDER}
+ORGANIZATION = ${GENERATOR_ORGANIZATION}
+
+# Metadata fields displayed with generated answers.
 TITLE_META_FIELDS = filename,page
-# AZURE_ENDPOINT = <required for provider azure>
 
-# [ingestor]
-# chunk_size = 700
-# chunk_overlap = 50
-# max_chunks = 20
-# separators = \n\n,\n,. ,! ,? , ,
-
-# [conversation_history]
-# MAX_TURNS = 3
-# MAX_CHARS = 8000
+# Required only when Azure is the generator provider.
+AZURE_ENDPOINT = ${AZURE_ENDPOINT}
 
 [metadata_filters]
 # Optional feature, off by default — leaving filterable_fields empty/commented
@@ -75,26 +61,31 @@ TITLE_META_FIELDS = filename,page
 # instance.yaml.
 # Types: str, int, list.
 # filterable_fields = <field>:<type>,...
+filterable_fields =
 # llm_provider = huggingface
-# llm_model = <fill in>
+# llm_model = provider-specific-model
 # llm_max_tokens = 256
 # llm_temperature = 0.1
 # llm_inference_provider = <required for huggingface>
-# llm_organization = <required for huggingface>
+# llm_organization = <required for huggingface
 
 [query_rewriter]
-# Enabled by default in the base image. Requires llm_* below to be filled in for
-# a working deploy — or set enabled = false instead if you don't need this feature.
-enabled = true
-# ISO code, e.g. "ar"; empty = no cross-lingual rewrite.
+# Set QUERY_REWRITER_ENABLED=false in deploy.env to disable this feature.
+enabled = ${QUERY_REWRITER_ENABLED}
+
+# Empty means that no cross-language rewriting is performed.
 # target_language =
-llm_provider = <fill in>
-llm_model = <fill in>
-llm_max_tokens = 256
-llm_temperature = 0.1
-# llm_inference_provider = <required for huggingface>
-# llm_organization = <required for huggingface>
-# NOTE: grounding (abstract/glossary) comes from instance.yaml's db_context key.
+
+llm_provider = ${QUERY_REWRITER_LLM_PROVIDER}
+llm_model = ${QUERY_REWRITER_LLM_MODEL}
+llm_max_tokens = ${QUERY_REWRITER_LLM_MAX_TOKENS}
+llm_temperature = ${QUERY_REWRITER_LLM_TEMPERATURE}
+
+# Required when Hugging Face is the query-rewriter provider.
+llm_inference_provider = ${QUERY_REWRITER_LLM_INFERENCE_PROVIDER}
+llm_organization = ${QUERY_REWRITER_LLM_ORGANIZATION}
+
+# Query-rewriter grounding is configured in instance.yaml under db_context.
 
 [input_guard]
 # Optional feature, off by default.
@@ -103,7 +94,7 @@ enabled = false
 # Required for mode = classifier.
 # endpoint_url =
 # llm_provider = huggingface
-# llm_model = <fill in>
+# llm_model = provider-specific-model
 # llm_max_tokens = 64
 # llm_temperature = 0.0
 # llm_inference_provider = <required for huggingface>
@@ -119,7 +110,7 @@ classification_enabled = false
 # endpoint_url =
 # model = Qwen/Qwen3Guard-Gen-0.6B
 # llm_provider = huggingface
-# llm_model = <fill in>
+# llm_model = provider-specific-model
 # llm_max_tokens = 16
 # llm_temperature = 0.0
 # llm_inference_provider = <required for huggingface>

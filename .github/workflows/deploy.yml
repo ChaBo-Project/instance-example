@@ -1,43 +1,324 @@
-name: Deploy <INSTANCE_NAME> instance
+name: Deploy ChaBo instance
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: ['orchestrator/**', 'qdrant/**', 'deploy.env']
+    branches:
+      - "main"
+    paths:
+      - "orchestrator/**"
+      - "qdrant/**"
+      - "scripts/**"
+      - "deploy.env"
+      - ".github/workflows/deploy.yml"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - id: v
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Load all public deployment settings from deploy.env.
+      # The validation collects every missing value before stopping.
+      - name: Validate deployment configuration
+        id: config
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          set -a; source deploy.env; set +a
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          missing=()
+          errors=()
+
+          require_value() {
+            local variable_name="$1"
+
+            if [[ -z "${!variable_name:-}" ]]; then
+              missing+=("$variable_name")
+            fi
+          }
+
+          required_variables=(
+            INSTANCE_NAME
+            CHABO_TAG
+            ORCHESTRATOR_HF_SPACE
+            QDRANT_HF_SPACE
+            INSTANCE_URL
+            QDRANT_URL
+            EMBEDDING_ENDPOINT_URL
+            RERANKER_ENDPOINT_URL
+            EMBEDDING_DATASET
+            COLLECTION_NAME
+            EMBEDDING_DIMENSION
+            VECTOR_COLUMN_NAME
+            BATCH_SIZE
+            TOP_K
+            GENERATOR_PROVIDER
+            GENERATOR_MODEL
+            GENERATOR_MAX_TOKENS
+            GENERATOR_TEMPERATURE
+            QUERY_REWRITER_ENABLED
+          )
+
+          for variable_name in "${required_variables[@]}"; do
+            require_value "$variable_name"
+          done
+
+          if [[ "${GENERATOR_PROVIDER:-}" == "huggingface" ]]; then
+            require_value GENERATOR_INFERENCE_PROVIDER
+            require_value GENERATOR_ORGANIZATION
+          fi
+
+          if [[ "${GENERATOR_PROVIDER:-}" == "azure" ]]; then
+            require_value AZURE_ENDPOINT
+          fi
+
+          case "${QUERY_REWRITER_ENABLED:-}" in
+            true)
+              require_value QUERY_REWRITER_LLM_PROVIDER
+              require_value QUERY_REWRITER_LLM_MODEL
+              require_value QUERY_REWRITER_LLM_MAX_TOKENS
+              require_value QUERY_REWRITER_LLM_TEMPERATURE
+
+              if [[ "${QUERY_REWRITER_LLM_PROVIDER:-}" == "huggingface" ]]; then
+                require_value QUERY_REWRITER_LLM_INFERENCE_PROVIDER
+                require_value QUERY_REWRITER_LLM_ORGANIZATION
+              fi
+              ;;
+            false)
+              ;;
+            "")
+              # Already reported as a missing variable.
+              ;;
+            *)
+              errors+=(
+                "QUERY_REWRITER_ENABLED must be either true or false."
+              )
+              ;;
+          esac
+
+          if [[ -z "${HF_TOKEN:-}" ]]; then
+            errors+=(
+              "GitHub Actions secret HF_TOKEN is missing."
+            )
+          fi
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "ERROR: The following required variables are empty:"
+
+            for variable_name in "${missing[@]}"; do
+              echo "  - $variable_name"
+            done
+          fi
+
+          if (( ${#errors[@]} > 0 )); then
+            echo "ERROR: Additional configuration problems:"
+
+            for error_message in "${errors[@]}"; do
+              echo "  - $error_message"
+            done
+          fi
+
+          if (( ${#missing[@]} > 0 || ${#errors[@]} > 0 )); then
+            echo
+            echo "Deployment stopped before any Hugging Face changes were made."
+            exit 1
+          fi
+
           {
+            echo "instance_name=$INSTANCE_NAME"
             echo "chabo_tag=$CHABO_TAG"
             echo "orchestrator_space=$ORCHESTRATOR_HF_SPACE"
             echo "qdrant_space=$QDRANT_HF_SPACE"
           } >> "$GITHUB_OUTPUT"
 
-      # Pin lives in exactly these two `uses:` lines — bump both together to upgrade.
-      # v0.1.0-test is the only tag ChaBo-Deploy has cut so far; move to a real
-      # released version once one exists.
+          echo "PASS: Deployment configuration is complete."
+
+      # Generate the real params.override.cfg used by the orchestrator.
+      # The template itself is not copied into the rendered deployment directory.
+      - name: Render orchestrator configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          rendered_directory=".rendered/orchestrator/instance_config"
+
+          mkdir -p "$rendered_directory"
+
+          cp \
+            orchestrator/instance_config/instance.yaml \
+            "$rendered_directory/instance.yaml"
+
+          python3 scripts/render-config.py \
+            orchestrator/instance_config/params.override.cfg.template \
+            "$rendered_directory/params.override.cfg"
+
+          test -s "$rendered_directory/params.override.cfg"
+
+          if grep -nE '\$\{[A-Z][A-Z0-9_]*\}' \
+            "$rendered_directory/params.override.cfg"; then
+            echo "ERROR: Unresolved variables remain in params.override.cfg."
+            exit 1
+          fi
+
+          echo "PASS: Orchestrator configuration rendered successfully."
+
+      # Configure runtime authentication without storing secret values in this repository.
+      # Hugging Face restarts the Space automatically when a secret is updated.
+      - name: Configure Orchestrator Space secrets
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          token = os.environ["HF_TOKEN"]
+          space = os.environ["ORCHESTRATOR_HF_SPACE"]
+          api = HfApi(token=token)
+
+          api.add_space_secret(
+              repo_id=space,
+              key="HF_TOKEN",
+              value=token,
+          )
+          api.add_space_secret(
+              repo_id=space,
+              key="QDRANT_API_KEY",
+              value=token,
+          )
+
+          print("PASS: Orchestrator Space secrets configured.")
+          PY
+
+      # Copy public Qdrant configuration from deploy.env to the Qdrant Space.
+      # Only variable names are printed; no secret values are displayed.
+      - name: Configure Qdrant Space variables
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["QDRANT_HF_SPACE"]
+
+          variable_names = (
+              "EMBEDDING_DATASET",
+              "COLLECTION_NAME",
+              "EMBEDDING_DIMENSION",
+              "VECTOR_COLUMN_NAME",
+              "BATCH_SIZE",
+              "TOP_K",
+          )
+
+          for variable_name in variable_names:
+              api.add_space_variable(
+                  repo_id=space,
+                  key=variable_name,
+                  value=os.environ[variable_name],
+              )
+              print(f"PASS: Configured Qdrant variable {variable_name}.")
+          PY
+
+      # Configure Qdrant runtime secrets.
+      # Dedicated GitHub secrets are optional; HF_TOKEN is used as the fallback.
+      - name: Configure Qdrant Space secrets
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
+
+          # Optional overrides. Missing GitHub secrets become empty values.
+          QDRANT_SERVICE_API_KEY_OVERRIDE: ${{ secrets.QDRANT__SERVICE__API_KEY }}
+          DATASET_READ_TOKEN_OVERRIDE: ${{ secrets.DATASET_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$QDRANT_SERVICE_API_KEY_OVERRIDE" ]]; then
+            echo "INFO: Using dedicated QDRANT__SERVICE__API_KEY."
+          else
+            echo "INFO: QDRANT__SERVICE__API_KEY is not set; using HF_TOKEN."
+          fi
+
+          if [[ -n "$DATASET_READ_TOKEN_OVERRIDE" ]]; then
+            echo "INFO: Using dedicated DATASET_READ_TOKEN."
+          else
+            echo "INFO: DATASET_READ_TOKEN is not set; using HF_TOKEN."
+          fi
+
+          export QDRANT_SERVICE_API_KEY_VALUE="${QDRANT_SERVICE_API_KEY_OVERRIDE:-$HF_TOKEN}"
+          export DATASET_READ_TOKEN_VALUE="${DATASET_READ_TOKEN_OVERRIDE:-$HF_TOKEN}"
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["QDRANT_HF_SPACE"]
+
+          space_secrets = {
+              "QDRANT__SERVICE__API_KEY": os.environ[
+                  "QDRANT_SERVICE_API_KEY_VALUE"
+              ],
+              "DATASET_READ_TOKEN": os.environ[
+                  "DATASET_READ_TOKEN_VALUE"
+              ],
+          }
+
+          for secret_name, secret_value in space_secrets.items():
+              api.add_space_secret(
+                  repo_id=space,
+                  key=secret_name,
+                  value=secret_value,
+              )
+              print(f"PASS: Configured Qdrant secret {secret_name}.")
+          PY
+
+      # Both action references must be updated together when changing versions.
       - name: Deploy orchestrator
         uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test
         with:
           component: orchestrator
-          hf_space: ${{ steps.v.outputs.orchestrator_space }}
-          image_tag: ${{ steps.v.outputs.chabo_tag }}
-          title: "Chabo Orchestrator — <INSTANCE_NAME>"
-          extra_content_path: orchestrator/instance_config
+          hf_space: ${{ steps.config.outputs.orchestrator_space }}
+          image_tag: ${{ steps.config.outputs.chabo_tag }}
+          title: "ChaBo Orchestrator — ${{ steps.config.outputs.instance_name }}"
+          extra_content_path: .rendered/orchestrator/instance_config
           hf_token: ${{ secrets.HF_TOKEN }}
 
-      - name: Deploy qdrant
+      - name: Deploy Qdrant
         uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test
         with:
           component: qdrant
-          hf_space: ${{ steps.v.outputs.qdrant_space }}
-          title: "Chabo Qdrant — <INSTANCE_NAME>"
+          hf_space: ${{ steps.config.outputs.qdrant_space }}
+          title: "ChaBo Qdrant — ${{ steps.config.outputs.instance_name }}"
           hf_token: ${{ secrets.HF_TOKEN }}

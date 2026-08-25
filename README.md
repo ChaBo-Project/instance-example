@@ -1,61 +1,210 @@
 # instance-example
 
-Template repo for a new ChaBo instance, deployed via the `hf-spaces` topology (two HF
-Spaces: orchestrator + a Gradio-wrapped Qdrant), matching the working `instance-endev`
-deployment. This repo holds **only this instance's config** — no application source, no
-deploy scripts. Deploy mechanics live once, generically, in
-[`ChaBo-Deploy`](https://github.com/ChaBo-Project/ChaBo-Deploy), referenced here at a
-pinned version — see `orchestrator/README.md` / `qdrant/README.md` for why.
+GitHub does not replace placeholders automatically when a repository is created
+from this template. Complete the following steps manually before running the
+deployment workflow.
 
-## Using this template
+### 1. Create or verify the embeddings Dataset
 
-GitHub does **not** substitute placeholders automatically when a repo is generated from
-a template — after creating your instance repo from this one
-(`gh repo create instance-<name> --template ChaBo-Project/instance-example`, or "Use this
-template" in the GitHub UI), work through this checklist by hand:
+Create the Hugging Face Dataset repository containing the embedded documents,
+or verify that the required Dataset already exists.
 
-1. **Replace every `<INSTANCE_NAME>` placeholder** with your instance's actual name:
-   - `deploy.env` (header comment)
-   - `.github/workflows/deploy.yml` (`name:`, both `title:` fields)
-   - `orchestrator/README.md`, `qdrant/README.md` (headers)
-   - `orchestrator/instance_config/instance.yaml`,
-     `orchestrator/instance_config/params.override.cfg` (header comments)
-2. **Fill in every `<fill in>` placeholder**:
-   - `deploy.env` — `CHABO_TAG`, `ORCHESTRATOR_HF_SPACE`, `QDRANT_HF_SPACE`,
-     `INSTANCE_URL`
-   - `orchestrator/instance_config/params.override.cfg` — at minimum
-     `[hf_endpoints]`, `[qdrant]`, `[generator]`, and `[query_rewriter]`'s `llm_*`
-     keys (or set `[query_rewriter] enabled = false` instead of filling those in)
-3. **Create two empty HF Spaces by hand** — one for each of `ORCHESTRATOR_HF_SPACE` and
-   `QDRANT_HF_SPACE` from `deploy.env` (e.g. at `hf.co/new-space`). This has to happen
-   before the deploy workflow ever runs: `deploy-hf-space`'s `push.sh` does a
-   `git clone` into `huggingface.co/spaces/<org>/<name>`, which fails on a namespace that
-   doesn't exist yet — the workflow renders and pushes *content* into a Space, it doesn't
-   create the Space itself. For each Space:
-   - **SDK: Docker** (required — the rendered content is a `Dockerfile`, not a Gradio/
-     Streamlit app spec).
-   - Visibility: private, unless you have a specific reason to make it public.
-   - Leave it otherwise empty — the first deploy run populates it.
-4. **Re-enable GitHub Actions** in your new repo's Actions tab — workflows copied from
-   a template repo are disabled by default until a maintainer turns them on.
-5. **Add the `HF_TOKEN` secret** (Settings → Secrets and variables → Actions) — see
-   `orchestrator/README.md` for what it's used for.
-6. **Set the Qdrant Space's own Variables/Secrets by hand**, now that it exists, in its
-   HF Space Settings panel (`COLLECTION_NAME`, `EMBEDDING_DATASET`,
-   `EMBEDDING_DIMENSION`, `QDRANT__SERVICE__API_KEY`, `DATASET_READ_TOKEN`) — never
-   applied by CI, see the commented block at the bottom of `deploy.env` and
-   `qdrant/README.md`. Can be done before or after the first deploy run, but must be set
-   before the Qdrant Space will actually come up healthy.
-7. Optionally fill in `orchestrator/instance_config/instance.yaml` (filters, db_context,
-   blocklist, instance_guidelines — all optional) and
-   `orchestrator/instance_config/prompt_overrides.md` (query rewrite / filter extraction
-   prompt steps — leave empty to use the framework defaults).
-8. Push to `main` — `.github/workflows/deploy.yml` runs on any push touching
-   `orchestrator/**`, `qdrant/**`, or `deploy.env`, and deploys both HF Spaces.
+The Dataset ID must match `EMBEDDING_DATASET` in `deploy.env`.
 
-## Scope note
+Example format:
 
-Only the `hf-spaces` topology is covered by this template so far. `ChaBo-Deploy` is
-gaining a second topology (`docker-compose-vm`, for co-located single-VM deployment) —
-once that's merged and proven, this template will likely grow a second variant. Until
-then, this template assumes HF Spaces.
+`<organization>/<dataset-name>`
+
+The Dataset must contain the columns expected by the Qdrant initialization
+process, including the document ID, vector, and payload metadata.
+
+A Hugging Face Collection is optional and can be used to organize related
+resources, but it does not replace the embeddings Dataset or the Qdrant
+collection.
+
+### 2. Create the two Hugging Face Spaces
+
+Create these two Spaces manually before running the deployment:
+
+1. Orchestrator Space
+2. Qdrant Space
+
+The repository IDs must match `ORCHESTRATOR_HF_SPACE` and `QDRANT_HF_SPACE`
+in `deploy.env`.
+
+For both Spaces:
+
+- Select `Docker` as the SDK.
+- Use private visibility unless the instance must be public.
+- Leave the Space empty.
+- Do not add application files manually; the deployment workflow will push them.
+
+The deployment workflow cannot create missing Spaces. It can only push content
+to Spaces that already exist.
+
+### 3. Create a fine-grained Hugging Face token
+
+Create a fine-grained token under:
+
+`Hugging Face → Settings → Access Tokens`
+
+Select both Space repositories:
+
+- `spaces/<organization>/<qdrant-space>`
+- `spaces/<organization>/<orchestrator-space>`
+
+Enable these repository permissions:
+
+- `Read contents of selected repos`
+- `Write contents/settings of selected repos`
+
+Select the organization that owns the inference resources and enable:
+
+- `Make calls to Inference Providers on behalf of selected orgs`
+- `Make calls to Inference Endpoints in selected orgs`
+
+Do not enable organization settings, billing, member-management, or
+organization-wide repository write permissions unless they are explicitly
+required.
+
+If the organization requires token approval, wait until an organization
+administrator approves the token.
+
+### 4. Add the tokens to GitHub Actions
+
+In the GitHub repository, open:
+
+`Settings → Secrets and variables → Actions`
+
+Create this required repository secret:
+
+- Name: `HF_TOKEN`
+- Value: the fine-grained Hugging Face token
+
+The workflow uses `HF_TOKEN` to:
+
+- Push content to both Hugging Face Spaces
+- Configure the Orchestrator Space secrets
+- Configure the Qdrant Space variables and secrets
+- Call the configured Hugging Face inference resources
+
+The following GitHub Actions secrets are optional:
+
+- `QDRANT__SERVICE__API_KEY`
+- `DATASET_READ_TOKEN`
+
+When an optional secret is not configured, the workflow uses `HF_TOKEN` as its
+default value.
+
+If `HF_TOKEN` is used as `DATASET_READ_TOKEN`, it must have read access to the
+embeddings Dataset.
+
+For better separation of permissions, a dedicated read-only
+`DATASET_READ_TOKEN` can be used.
+
+Never place token values in `deploy.env`, workflow files, README files, or other
+committed configuration.
+
+### 5. Complete the public deployment configuration
+
+Edit `deploy.env` and fill in all required public values, including:
+
+- `INSTANCE_NAME`
+- `CHABO_TAG`
+- `ORCHESTRATOR_HF_SPACE`
+- `QDRANT_HF_SPACE`
+- `INSTANCE_URL`
+- `QDRANT_URL`
+- `EMBEDDING_ENDPOINT_URL`
+- `RERANKER_ENDPOINT_URL`
+- `EMBEDDING_DATASET`
+- `COLLECTION_NAME`
+- `EMBEDDING_DIMENSION`
+- Generator settings
+
+`params.override.cfg.template` contains variable placeholders. The deployment
+workflow combines it with `deploy.env` and generates the final
+`params.override.cfg`.
+
+Do not edit or commit a generated `params.override.cfg`.
+
+### 6. Automatic Hugging Face Space configuration
+
+The workflow automatically configures the required Hugging Face Space settings.
+They do not need to be entered manually in the Hugging Face Space interface.
+
+#### Orchestrator Space secrets
+
+The workflow configures:
+
+- `HF_TOKEN`
+- `QDRANT_API_KEY`
+
+Both use the required GitHub Actions secret `HF_TOKEN`.
+
+#### Qdrant Space variables
+
+The workflow reads these public values from `deploy.env` and adds them to the
+Qdrant Space:
+
+- `EMBEDDING_DATASET`
+- `COLLECTION_NAME`
+- `EMBEDDING_DIMENSION`
+- `VECTOR_COLUMN_NAME`
+- `BATCH_SIZE`
+- `TOP_K`
+
+Only these selected values are added to the Qdrant Space settings. The workflow
+does not submit all values from `deploy.env` to Hugging Face.
+
+#### Qdrant Space secrets
+
+The workflow configures:
+
+- `QDRANT__SERVICE__API_KEY`
+- `DATASET_READ_TOKEN`
+
+For each secret:
+
+1. The workflow uses the matching optional GitHub Actions secret when it exists.
+2. Otherwise, the workflow uses `HF_TOKEN` as the fallback.
+
+Secret values are never stored in `deploy.env` and are not printed in the
+workflow logs.
+
+### 7. Complete optional instance configuration manually
+
+This step is not automated.
+
+Edit `orchestrator/instance_config/instance.yaml` only when the instance needs:
+
+- Metadata filters
+- Database context
+- Blocklist additions
+- Instance-specific guidelines
+
+Leave optional sections empty or commented when they are not required.
+
+## What the deployment workflow automates
+
+The `Deploy ChaBo instance` workflow performs these operations:
+
+1. Validates the required public configuration and GitHub secret.
+2. Generates `params.override.cfg` from `deploy.env` and
+   `params.override.cfg.template`.
+3. Configures the Orchestrator Space secrets.
+4. Configures the selected Qdrant Space variables.
+5. Configures the Qdrant Space secrets, including fallback handling.
+6. Deploys the Orchestrator Space.
+7. Deploys the Qdrant Space.
+
+The following prerequisites remain manual:
+
+- Create or verify the embeddings Dataset.
+- Create both empty Docker Spaces.
+- Create the fine-grained Hugging Face token.
+- Add the token to GitHub Actions.
+- Complete the public values in `deploy.env`.
+- Optionally configure `instance.yaml`.
+- Start the workflow through GitHub Actions or merge the changes into a
+  configured deployment branch.

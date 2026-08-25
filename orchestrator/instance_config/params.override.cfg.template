@@ -52,7 +52,7 @@ ORGANIZATION = ${GENERATOR_ORGANIZATION}
 TITLE_META_FIELDS = filename,page
 
 # Required only when Azure is the generator provider.
-# AZURE_ENDPOINT is currently not enabled by deploy.env.
+AZURE_ENDPOINT = ${AZURE_ENDPOINT}
 
 [metadata_filters]
 # Optional feature, off by default — leaving filterable_fields empty/commented

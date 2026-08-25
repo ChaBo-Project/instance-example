@@ -76,6 +76,10 @@ jobs:
             require_value GENERATOR_ORGANIZATION
           fi
 
+          if [[ "${GENERATOR_PROVIDER:-}" == "azure" ]]; then
+            require_value AZURE_ENDPOINT
+          fi
+
           case "${QUERY_REWRITER_ENABLED:-}" in
             true)
               require_value QUERY_REWRITER_LLM_PROVIDER

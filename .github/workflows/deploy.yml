@@ -14,11 +14,19 @@ on:
 
 jobs:
   deploy:
+    if: github.repository != 'ChaBo-Project/instance-example'
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Check repository safety before deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/check-public-safety.py
 
       # Load all public deployment settings from deploy.env.
       # The validation collects every missing value before stopping.
@@ -48,10 +56,16 @@ jobs:
           required_variables=(
             INSTANCE_NAME
             CHABO_TAG
+            CHATUI_TAG
             ORCHESTRATOR_HF_SPACE
             QDRANT_HF_SPACE
+            CHATUI_HF_SPACE
+            HF_SPACES_PRIVATE
             INSTANCE_URL
             QDRANT_URL
+            CHATUI_URL
+            HF_COLLECTION_TITLE
+            HF_COLLECTION_PRIVATE
             EMBEDDING_ENDPOINT_URL
             RERANKER_ENDPOINT_URL
             EMBEDDING_DATASET
@@ -104,6 +118,41 @@ jobs:
               ;;
           esac
 
+          case "${HF_COLLECTION_PRIVATE:-}" in
+            true|false)
+              ;;
+            "")
+              # Already reported as a missing variable.
+              ;;
+            *)
+              errors+=(
+                "HF_COLLECTION_PRIVATE must be either true or false."
+              )
+              ;;
+          esac
+
+          case "${HF_SPACES_PRIVATE:-}" in
+            true)
+              ;;
+            "")
+              # Already reported as a missing variable.
+              ;;
+            *)
+              errors+=(
+                "HF_SPACES_PRIVATE must be true because the "
+                "Orchestrator and Qdrant Spaces contain private backend services."
+              )
+              ;;
+          esac
+
+          if [[ -n "${HF_RESOURCE_GROUP_ID:-}" &&
+                ! "${HF_RESOURCE_GROUP_ID}" =~ ^[0-9a-fA-F]{24}$ ]]; then
+            errors+=(
+              "HF_RESOURCE_GROUP_ID must be empty or a 24-character "
+              "hexadecimal Resource Group ID."
+            )
+          fi
+
           if [[ -z "${HF_TOKEN:-}" ]]; then
             errors+=(
               "GitHub Actions secret HF_TOKEN is missing."
@@ -135,11 +184,403 @@ jobs:
           {
             echo "instance_name=$INSTANCE_NAME"
             echo "chabo_tag=$CHABO_TAG"
+            echo "chatui_tag=$CHATUI_TAG"
             echo "orchestrator_space=$ORCHESTRATOR_HF_SPACE"
             echo "qdrant_space=$QDRANT_HF_SPACE"
+            echo "chatui_space=$CHATUI_HF_SPACE"
+            echo "chatui_url=$CHATUI_URL"
+            echo "hf_resource_group_id=${HF_RESOURCE_GROUP_ID:-}"
           } >> "$GITHUB_OUTPUT"
 
           echo "PASS: Deployment configuration is complete."
+
+      # Reuse existing private backend Spaces or create them when permitted.
+      - name: Create or verify private backend Spaces
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
+          QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
+          HF_RESOURCE_GROUP_ID: ${{ steps.config.outputs.hf_resource_group_id }}
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+          from huggingface_hub.utils import HfHubHTTPError
+
+          token = os.environ["HF_TOKEN"]
+          orchestrator_space = os.environ["ORCHESTRATOR_HF_SPACE"]
+          qdrant_space = os.environ["QDRANT_HF_SPACE"]
+
+          resource_group_id = (
+              os.environ.get("HF_RESOURCE_GROUP_ID") or None
+          )
+
+          if orchestrator_space == qdrant_space:
+              raise ValueError(
+                  "Orchestrator and Qdrant Spaces must use different "
+                  "repository IDs."
+              )
+
+          backend_spaces = (
+              ("Orchestrator", orchestrator_space),
+              ("Qdrant", qdrant_space),
+          )
+
+          api = HfApi(token=token)
+
+          for component_name, space_id in backend_spaces:
+              try:
+                  api.repo_info(
+                      repo_id=space_id,
+                      repo_type="space",
+                  )
+                  print(
+                      f"INFO: Existing {component_name} "
+                      f"Space found: {space_id}"
+                  )
+              except HfHubHTTPError as error:
+                  status_code = getattr(
+                      error.response,
+                      "status_code",
+                      None,
+                  )
+
+                  if status_code != 404:
+                      raise RuntimeError(
+                          f"Unable to verify whether the {component_name} "
+                          f"Space {space_id} exists. Check HF_TOKEN access "
+                          "to the target organization."
+                      ) from error
+
+                  try:
+                      api.create_repo(
+                          repo_id=space_id,
+                          repo_type="space",
+                          space_sdk="docker",
+                          visibility="private",
+                          resource_group_id=resource_group_id,
+                          exist_ok=True,
+                      )
+                      print(
+                          f"PASS: Created private {component_name} "
+                          f"Space: {space_id}"
+                      )
+                  except HfHubHTTPError as create_error:
+                      create_status = getattr(
+                          create_error.response,
+                          "status_code",
+                          None,
+                      )
+
+                      if create_status in (401, 403, 409):
+                          raise RuntimeError(
+                              f"{component_name} Space {space_id} is "
+                              "missing or inaccessible, and HF_TOKEN "
+                              "cannot create it. Either grant repository-"
+                              "creation permission to HF_TOKEN or manually "
+                              "create this Space with Docker SDK and private "
+                              "visibility. Then grant HF_TOKEN read and write "
+                              "access to the Space and run the workflow again."
+                          ) from create_error
+
+                      raise
+
+              try:
+                  api.update_repo_settings(
+                      repo_id=space_id,
+                      repo_type="space",
+                      visibility="private",
+                  )
+              except HfHubHTTPError as settings_error:
+                  settings_status = getattr(
+                      settings_error.response,
+                      "status_code",
+                      None,
+                  )
+
+                  if settings_status in (401, 403):
+                      raise RuntimeError(
+                          f"{component_name} Space {space_id} exists, "
+                          "but HF_TOKEN cannot enforce private visibility. "
+                          "Grant the token write access to this Space."
+                      ) from settings_error
+
+                  raise
+
+              print(
+                  f"PASS: Private {component_name} Space is ready: "
+                  f"{space_id}"
+              )
+          PY
+
+      # Reuse the public ChatUI Space or create it when permitted.
+      # Existing ChatUI Spaces are explicitly kept public.
+      - name: Create or verify public ChatUI Space
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          CHATUI_HF_SPACE: ${{ steps.config.outputs.chatui_space }}
+          ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
+          QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
+          HF_RESOURCE_GROUP_ID: ${{ steps.config.outputs.hf_resource_group_id }}
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+          from huggingface_hub.utils import HfHubHTTPError
+
+          token = os.environ["HF_TOKEN"]
+          chatui_space = os.environ["CHATUI_HF_SPACE"]
+          resource_group_id = (
+              os.environ.get("HF_RESOURCE_GROUP_ID") or None
+          )
+          private_spaces = {
+              os.environ["ORCHESTRATOR_HF_SPACE"],
+              os.environ["QDRANT_HF_SPACE"],
+          }
+
+          if chatui_space in private_spaces:
+              raise ValueError(
+                  "CHATUI_HF_SPACE must not match the private "
+                  "Orchestrator or Qdrant Space."
+              )
+
+          api = HfApi(token=token)
+
+          try:
+              api.repo_info(
+                  repo_id=chatui_space,
+                  repo_type="space",
+              )
+              print(f"INFO: Existing ChatUI Space found: {chatui_space}")
+          except HfHubHTTPError as error:
+              status_code = getattr(error.response, "status_code", None)
+
+              if status_code != 404:
+                  raise RuntimeError(
+                      "Unable to verify whether the ChatUI Space exists. "
+                      "Check HF_TOKEN access to the target organization."
+                  ) from error
+
+              try:
+                  api.create_repo(
+                      repo_id=chatui_space,
+                      repo_type="space",
+                      space_sdk="docker",
+                      visibility="public",
+                      resource_group_id=resource_group_id,
+                      exist_ok=True,
+                  )
+                  print(f"PASS: Created public ChatUI Space: {chatui_space}")
+              except HfHubHTTPError as create_error:
+                  create_status = getattr(
+                      create_error.response,
+                      "status_code",
+                      None,
+                  )
+
+                  if create_status in (401, 403):
+                      raise RuntimeError(
+                          f"ChatUI Space {chatui_space} does not exist and "
+                          "HF_TOKEN cannot create it. Either grant repository-"
+                          "creation permission to HF_TOKEN or manually create "
+                          "this Space with Docker SDK and public visibility."
+                      ) from create_error
+
+                  raise
+
+          try:
+              api.update_repo_settings(
+                  repo_id=chatui_space,
+                  repo_type="space",
+                  visibility="public",
+              )
+          except HfHubHTTPError as settings_error:
+              settings_status = getattr(
+                  settings_error.response,
+                  "status_code",
+                  None,
+              )
+
+              if settings_status in (401, 403):
+                  raise RuntimeError(
+                      f"ChatUI Space {chatui_space} exists, but HF_TOKEN "
+                      "cannot update its settings. Grant the token write "
+                      "access to this Space."
+                  ) from settings_error
+
+              raise
+
+          print(f"PASS: Public ChatUI Space is ready: {chatui_space}")
+          PY
+
+      # Configure the public ChatUI without committing backend credentials.
+      # CHATUI_BACKEND_TOKEN is optional; HF_TOKEN is used as the fallback.
+      - name: Configure ChatUI Space
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          CHATUI_BACKEND_TOKEN_OVERRIDE: ${{ secrets.CHATUI_BACKEND_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+
+          python3 - <<'PY'
+          import json
+          import os
+
+          from huggingface_hub import HfApi
+
+          deploy_token = os.environ["HF_TOKEN"]
+          backend_token = (
+              os.environ.get("CHATUI_BACKEND_TOKEN_OVERRIDE")
+              or deploy_token
+          )
+
+          chatui_space = os.environ["CHATUI_HF_SPACE"]
+          chatui_url = os.environ["CHATUI_URL"].rstrip("/")
+          instance_url = os.environ["INSTANCE_URL"].rstrip("/")
+          instance_name = os.environ["INSTANCE_NAME"]
+
+          models = [
+              {
+                  "name": "ChaBo",
+                  "displayName": f"{instance_name} Assistant",
+                  "description": (
+                      "Retrieval-augmented generation powered by ChaBo."
+                  ),
+                  "instructions": {
+                      "title": "Instructions",
+                      "content": (
+                          "Ask questions about the available documents. "
+                          "Answers may include source citations."
+                      ),
+                  },
+                  "multimodal": True,
+                  "multimodalAcceptedMimetypes": [
+                      "application/pdf",
+                  ],
+                  "chatPromptTemplate": (
+                      "{{#each messages}}"
+                      "{{#ifUser}}{{content}}{{/ifUser}}"
+                      "{{#ifAssistant}}{{content}}{{/ifAssistant}}"
+                      "{{/each}}"
+                  ),
+                  "parameters": {
+                      "temperature": 0.0,
+                      "max_new_tokens": 2048,
+                  },
+                  "endpoints": [
+                      {
+                          "type": "langserve-streaming",
+                          "url": (
+                              f"{instance_url}/chatfed-ui-stream"
+                          ),
+                          "streamingFileUploadUrl": (
+                              f"{instance_url}/"
+                              "chatfed-with-file-stream"
+                          ),
+                          "inputKey": "text",
+                          "fileInputKey": "files",
+                      }
+                  ],
+              }
+          ]
+
+          dotenv_local = "\n".join(
+              [
+                  f"MODELS=`{json.dumps(models)}`",
+                  f"PUBLIC_ORIGIN={json.dumps(chatui_url)}",
+                  f"PUBLIC_APP_NAME={json.dumps(instance_name)}",
+                  (
+                      "PUBLIC_APP_DESCRIPTION="
+                      + json.dumps(
+                          "Retrieval-augmented assistant powered by ChaBo."
+                      )
+                  ),
+                  "PUBLIC_APP_ASSETS=chatui",
+                  "PUBLIC_APP_DISCLAIMER=1",
+                  (
+                      "PUBLIC_APP_DISCLAIMER_MESSAGE="
+                      + json.dumps(
+                          "AI-generated answers may be inaccurate. "
+                          "Do not enter sensitive personal information."
+                      )
+                  ),
+                  "ENABLE_ASSISTANTS=false",
+                  "ENABLE_ASSISTANTS_RAG=false",
+                  "COMMUNITY_TOOLS=false",
+                  "LLM_SUMMARIZATION=false",
+                  "MONGODB_URL=mongodb://localhost:27017",
+                  "",
+              ]
+          )
+
+          api = HfApi(token=deploy_token)
+
+          space_variables = api.get_space_variables(
+              repo_id=chatui_space,
+          )
+          space_secrets = api.get_space_secrets(
+              repo_id=chatui_space,
+          )
+
+          # HF_TOKEN must exist only as a private secret.
+          if "HF_TOKEN" in space_variables:
+              api.delete_space_variable(
+                  repo_id=chatui_space,
+                  key="HF_TOKEN",
+              )
+              print("INFO: Removed conflicting public HF_TOKEN variable.")
+
+          api.add_space_secret(
+              repo_id=chatui_space,
+              key="HF_TOKEN",
+              value=backend_token,
+          )
+          print("PASS: Configured private ChatUI secret HF_TOKEN.")
+
+          # DOTENV_LOCAL must exist only as a public variable.
+          if "DOTENV_LOCAL" in space_secrets:
+              api.delete_space_secret(
+                  repo_id=chatui_space,
+                  key="DOTENV_LOCAL",
+              )
+              print("INFO: Removed conflicting DOTENV_LOCAL secret.")
+
+          api.add_space_variable(
+              repo_id=chatui_space,
+              key="DOTENV_LOCAL",
+              value=dotenv_local,
+          )
+          print("PASS: Configured public ChatUI variable DOTENV_LOCAL.")
+
+          if os.environ.get("CHATUI_BACKEND_TOKEN_OVERRIDE"):
+              print("INFO: Using dedicated CHATUI_BACKEND_TOKEN.")
+          else:
+              print(
+                  "INFO: CHATUI_BACKEND_TOKEN is not configured; "
+                  "using HF_TOKEN."
+              )
+
+          print("PASS: ChatUI Space configured.")
+          PY
 
       # Generate the real params.override.cfg used by the orchestrator.
       # The template itself is not copied into the rendered deployment directory.
@@ -304,9 +745,9 @@ jobs:
               print(f"PASS: Configured Qdrant secret {secret_name}.")
           PY
 
-      # Both action references must be updated together when changing versions.
+      # All three action references must use the same pinned version.
       - name: Deploy orchestrator
-        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test
+        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@28bee7a2ecfc989fbba28d4e1c808777b88365d2
         with:
           component: orchestrator
           hf_space: ${{ steps.config.outputs.orchestrator_space }}
@@ -316,9 +757,181 @@ jobs:
           hf_token: ${{ secrets.HF_TOKEN }}
 
       - name: Deploy Qdrant
-        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@v0.1.0-test
+        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@28bee7a2ecfc989fbba28d4e1c808777b88365d2
         with:
           component: qdrant
           hf_space: ${{ steps.config.outputs.qdrant_space }}
           title: "ChaBo Qdrant — ${{ steps.config.outputs.instance_name }}"
           hf_token: ${{ secrets.HF_TOKEN }}
+
+      - name: Deploy ChatUI
+        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@28bee7a2ecfc989fbba28d4e1c808777b88365d2
+        with:
+          component: chatui
+          hf_space: ${{ steps.config.outputs.chatui_space }}
+          image_tag: ${{ steps.config.outputs.chatui_tag }}
+          title: "ChaBo UI — ${{ steps.config.outputs.instance_name }}"
+          hf_token: ${{ secrets.HF_TOKEN }}
+
+      - name: Create or update Hugging Face Collection
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+          from huggingface_hub.utils import HfHubHTTPError
+
+          token = os.environ["HF_TOKEN"]
+          collection_title = os.environ["HF_COLLECTION_TITLE"]
+          collection_private = (
+              os.environ["HF_COLLECTION_PRIVATE"].lower() == "true"
+          )
+
+          resource_group_id = (
+              os.environ.get("HF_RESOURCE_GROUP_ID") or None
+          )
+
+          chatui_space = os.environ["CHATUI_HF_SPACE"]
+
+          if "/" not in chatui_space:
+              raise ValueError(
+                  "CHATUI_HF_SPACE must use organization/space-name format."
+              )
+
+          collection_namespace = chatui_space.split("/", 1)[0]
+
+          api = HfApi(token=token)
+
+          matching_collections = [
+              existing_collection
+              for existing_collection in api.list_collections(
+                  owner=collection_namespace
+              )
+              if existing_collection.title == collection_title
+          ]
+
+          if len(matching_collections) > 1:
+              raise RuntimeError(
+                  f"Multiple Collections named {collection_title!r} exist under "
+                  f"{collection_namespace}. Rename or remove duplicates so the "
+                  "workflow can identify exactly one Collection."
+              )
+
+          if matching_collections:
+              collection = matching_collections[0]
+              print(
+                  f"INFO: Existing Hugging Face Collection found: "
+                  f"{collection.slug}"
+              )
+          else:
+              try:
+                  collection = api.create_collection(
+                      title=collection_title,
+                      namespace=collection_namespace,
+                      private=collection_private,
+                      resource_group_id=resource_group_id,
+                      exists_ok=True,
+                  )
+                  print(
+                      f"PASS: Created Hugging Face Collection: "
+                      f"{collection.slug}"
+                  )
+              except HfHubHTTPError as create_error:
+                  create_status = getattr(
+                      create_error.response,
+                      "status_code",
+                      None,
+                  )
+
+                  if create_status in (401, 403):
+                      visibility = (
+                          "private" if collection_private else "public"
+                      )
+                      raise RuntimeError(
+                          f"Hugging Face Collection {collection_title!r} "
+                          f"does not exist under {collection_namespace}, and "
+                          "HF_TOKEN cannot create it. Either grant Collection "
+                          "creation permission to HF_TOKEN or manually create "
+                          f"a {visibility} Collection with this exact title."
+                      ) from create_error
+
+                  raise
+
+          try:
+              api.update_collection_metadata(
+                  collection_slug=collection.slug,
+                  private=collection_private,
+              )
+
+          except HfHubHTTPError as metadata_error:
+              metadata_status = getattr(
+                  metadata_error.response,
+                  "status_code",
+                  None,
+              )
+
+              if metadata_status in (401, 403):
+                  raise RuntimeError(
+                      f"Collection {collection.slug} exists, but HF_TOKEN "
+                      "cannot update it. Grant the token write access to "
+                      "this Collection."
+                  ) from metadata_error
+
+              raise
+
+          items = (
+              (os.environ["ORCHESTRATOR_HF_SPACE"], "space"),
+              (os.environ["QDRANT_HF_SPACE"], "space"),
+              (chatui_space, "space"),
+              (os.environ["EMBEDDING_DATASET"], "dataset"),
+          )
+
+          for item_id, item_type in items:
+              try:
+                  api.add_collection_item(
+                      collection_slug=collection.slug,
+                      item_id=item_id,
+                      item_type=item_type,
+                      exists_ok=True,
+                  )
+              except HfHubHTTPError as item_error:
+                  item_status = getattr(
+                      item_error.response,
+                      "status_code",
+                      None,
+                  )
+
+                  if item_status in (401, 403):
+                      raise RuntimeError(
+                          f"Collection {collection.slug} exists, but HF_TOKEN "
+                          "cannot add deployment resources. Grant the token "
+                          "write access to this Collection."
+                      ) from item_error
+
+                  if item_status == 404:
+                      raise RuntimeError(
+                          f"Cannot add {item_type} {item_id} because Hugging "
+                          "Face could not find or access that resource."
+                      ) from item_error
+
+                  raise
+
+              print(
+                  f"PASS: Collection contains {item_type} {item_id}."
+              )
+
+          visibility = "private" if collection_private else "public"
+          print(
+              f"PASS: {visibility.capitalize()} Hugging Face Collection "
+              f"is ready: {collection.slug}"
+          )
+          PY

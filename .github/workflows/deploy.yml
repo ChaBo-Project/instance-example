@@ -60,6 +60,7 @@ jobs:
             ORCHESTRATOR_HF_SPACE
             QDRANT_HF_SPACE
             CHATUI_HF_SPACE
+            CHATUI_HF_SPACE_PRIVATE
             HF_SPACES_PRIVATE
             INSTANCE_URL
             QDRANT_URL
@@ -131,6 +132,19 @@ jobs:
               ;;
           esac
 
+          case "${CHATUI_HF_SPACE_PRIVATE:-}" in
+            true|false)
+              ;;
+            "")
+              # Already reported as a missing variable.
+              ;;
+            *)
+              errors+=(
+                "CHATUI_HF_SPACE_PRIVATE must be either true or false."
+              )
+              ;;
+          esac
+
           case "${HF_SPACES_PRIVATE:-}" in
             true)
               ;;
@@ -188,6 +202,7 @@ jobs:
             echo "orchestrator_space=$ORCHESTRATOR_HF_SPACE"
             echo "qdrant_space=$QDRANT_HF_SPACE"
             echo "chatui_space=$CHATUI_HF_SPACE"
+            echo "chatui_space_private=$CHATUI_HF_SPACE_PRIVATE"
             echo "chatui_url=$CHATUI_URL"
             echo "hf_resource_group_id=${HF_RESOURCE_GROUP_ID:-}"
           } >> "$GITHUB_OUTPUT"
@@ -319,13 +334,14 @@ jobs:
               )
           PY
 
-      # Reuse the public ChatUI Space or create it when permitted.
-      # Existing ChatUI Spaces are explicitly kept public.
-      - name: Create or verify public ChatUI Space
+      # Reuse the configured ChatUI Space or create it when permitted.
+      # The configured visibility is also enforced on existing Spaces.
+      - name: Create or verify ChatUI Space
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           CHATUI_HF_SPACE: ${{ steps.config.outputs.chatui_space }}
+          CHATUI_HF_SPACE_PRIVATE: ${{ steps.config.outputs.chatui_space_private }}
           ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
           QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
           HF_RESOURCE_GROUP_ID: ${{ steps.config.outputs.hf_resource_group_id }}
@@ -342,17 +358,23 @@ jobs:
 
           token = os.environ["HF_TOKEN"]
           chatui_space = os.environ["CHATUI_HF_SPACE"]
+          chatui_private = (
+              os.environ["CHATUI_HF_SPACE_PRIVATE"].lower() == "true"
+          )
+          visibility = "private" if chatui_private else "public"
+
           resource_group_id = (
               os.environ.get("HF_RESOURCE_GROUP_ID") or None
           )
-          private_spaces = {
+
+          backend_spaces = {
               os.environ["ORCHESTRATOR_HF_SPACE"],
               os.environ["QDRANT_HF_SPACE"],
           }
 
-          if chatui_space in private_spaces:
+          if chatui_space in backend_spaces:
               raise ValueError(
-                  "CHATUI_HF_SPACE must not match the private "
+                  "CHATUI_HF_SPACE must not match the "
                   "Orchestrator or Qdrant Space."
               )
 
@@ -378,11 +400,14 @@ jobs:
                       repo_id=chatui_space,
                       repo_type="space",
                       space_sdk="docker",
-                      visibility="public",
+                      visibility=visibility,
                       resource_group_id=resource_group_id,
                       exist_ok=True,
                   )
-                  print(f"PASS: Created public ChatUI Space: {chatui_space}")
+                  print(
+                      f"PASS: Created {visibility} ChatUI Space: "
+                      f"{chatui_space}"
+                  )
               except HfHubHTTPError as create_error:
                   create_status = getattr(
                       create_error.response,
@@ -395,7 +420,8 @@ jobs:
                           f"ChatUI Space {chatui_space} does not exist and "
                           "HF_TOKEN cannot create it. Either grant repository-"
                           "creation permission to HF_TOKEN or manually create "
-                          "this Space with Docker SDK and public visibility."
+                          f"this Space with Docker SDK and {visibility} "
+                          "visibility."
                       ) from create_error
 
                   raise
@@ -404,7 +430,7 @@ jobs:
               api.update_repo_settings(
                   repo_id=chatui_space,
                   repo_type="space",
-                  visibility="public",
+                  visibility=visibility,
               )
           except HfHubHTTPError as settings_error:
               settings_status = getattr(
@@ -416,13 +442,16 @@ jobs:
               if settings_status in (401, 403):
                   raise RuntimeError(
                       f"ChatUI Space {chatui_space} exists, but HF_TOKEN "
-                      "cannot update its settings. Grant the token write "
-                      "access to this Space."
+                      f"cannot enforce {visibility} visibility. Grant the "
+                      "token write access to this Space."
                   ) from settings_error
 
               raise
 
-          print(f"PASS: Public ChatUI Space is ready: {chatui_space}")
+          print(
+              f"PASS: {visibility.capitalize()} ChatUI Space is ready: "
+              f"{chatui_space}"
+          )
           PY
 
       # Configure the public ChatUI without committing backend credentials.

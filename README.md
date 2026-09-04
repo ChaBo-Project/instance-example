@@ -89,8 +89,8 @@ When `HF_RESOURCE_GROUP_ID` is configured, the token owner must have permission
 to create and update resources inside that Enterprise Resource Group.
 
 If these creation permissions cannot be granted, manually create the private
-Orchestrator and Qdrant Spaces, the public ChatUI Space, and the Hugging Face
-Collection before running the workflow.
+Orchestrator and Qdrant Spaces, the configured public or private ChatUI Space,
+and the Hugging Face Collection before running the workflow.
 
 In both modes, the token must have write access to the three Spaces and the
 Collection so the workflow can configure and update them.
@@ -126,7 +126,7 @@ Create this required repository secret:
 The workflow uses `HF_TOKEN` to:
 
 - Find or create the private Orchestrator and Qdrant Spaces
-- Find or create the public ChatUI Space
+- Find or create the ChatUI Space with the configured visibility
 - Find or create the Hugging Face Collection
 - Push content to all three Hugging Face Spaces
 - Configure the ChatUI Space variable and secret
@@ -141,8 +141,8 @@ The following GitHub Actions secrets are optional:
 - `CHATUI_BACKEND_TOKEN`
 
 `CHATUI_BACKEND_TOKEN` can be a dedicated read-only token with access to the
-private Orchestrator Space. The public ChatUI uses this token server-side when
-calling the private Orchestrator.
+private Orchestrator Space. The ChatUI uses this token server-side when calling
+the private Orchestrator.
 
 When `CHATUI_BACKEND_TOKEN` is not configured, the workflow uses `HF_TOKEN` as
 the fallback.
@@ -169,6 +169,7 @@ Edit `deploy.env` and fill in all required public values, including:
 - `ORCHESTRATOR_HF_SPACE`
 - `QDRANT_HF_SPACE`
 - `CHATUI_HF_SPACE`
+- `CHATUI_HF_SPACE_PRIVATE`
 - `HF_SPACES_PRIVATE`
 - `INSTANCE_URL`
 - `QDRANT_URL`
@@ -181,6 +182,19 @@ Edit `deploy.env` and fill in all required public values, including:
 - `COLLECTION_NAME`
 - `EMBEDDING_DIMENSION`
 - Generator settings
+
+Set `CHATUI_HF_SPACE_PRIVATE` to control the visibility of the ChatUI Space:
+
+- `"false"` creates or keeps the ChatUI Space public.
+- `"true"` creates or keeps the ChatUI Space private.
+
+The workflow applies this setting to both newly created and existing ChatUI
+Spaces. A private ChatUI requires users to sign in to Hugging Face and have
+access to the Space.
+
+This setting is independent of `HF_COLLECTION_PRIVATE`. For example, the
+ChatUI Space can be private while the Hugging Face Collection remains public.
+Adding a private Space to a public Collection does not make the Space public.
 
 `HF_RESOURCE_GROUP_ID` is optional. Set it to the 24-character hexadecimal ID
 from the Hugging Face Enterprise Resource Group page when resources must be
@@ -225,10 +239,13 @@ The workflow:
 - Reuses the configured ChatUI Space when it exists
 - Creates it automatically when it is missing and the token permits creation
 - Stops with manual-creation instructions when creation is not permitted
-- Enforces public visibility
+- Enforces the visibility configured through `CHATUI_HF_SPACE_PRIVATE`
 - Deploys the configured ChatUI image
 - Generates the `DOTENV_LOCAL` configuration
 - Connects ChatUI to the private Orchestrator
+
+ Set `CHATUI_HF_SPACE_PRIVATE="false"` for a public ChatUI Space or
+`CHATUI_HF_SPACE_PRIVATE="true"` for a private ChatUI Space.
 
 The workflow configures:
 
@@ -331,7 +348,7 @@ The `Deploy ChaBo instance` workflow performs these operations:
 
 1. Validates the required public configuration and GitHub secret.
 2. Finds or creates the private Orchestrator and Qdrant Spaces.
-3. Finds or creates the public ChatUI Space.
+3. Finds or creates the ChatUI Space with the configured visibility.
 4. Configures the ChatUI Space variable and secret.
 5. Generates `params.override.cfg` from `deploy.env` and
    `params.override.cfg.template`.

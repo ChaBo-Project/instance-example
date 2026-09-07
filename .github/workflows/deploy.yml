@@ -622,6 +622,10 @@ jobs:
           source deploy.env
           set +a
 
+          # Use existing defaults when these optional settings are empty or missing.
+          export TITLE_META_FIELDS="${TITLE_META_FIELDS:-filename,page}"
+          export FILTERABLE_FIELDS="${FILTERABLE_FIELDS:-}"
+
           rendered_directory=".rendered/orchestrator/instance_config"
 
           mkdir -p "$rendered_directory"

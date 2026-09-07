@@ -49,7 +49,7 @@ INFERENCE_PROVIDER = ${GENERATOR_INFERENCE_PROVIDER}
 ORGANIZATION = ${GENERATOR_ORGANIZATION}
 
 # Metadata fields displayed with generated answers.
-TITLE_META_FIELDS = filename,page
+TITLE_META_FIELDS = ${TITLE_META_FIELDS}
 
 # Required only when Azure is the generator provider.
 AZURE_ENDPOINT = ${AZURE_ENDPOINT}
@@ -61,7 +61,7 @@ AZURE_ENDPOINT = ${AZURE_ENDPOINT}
 # instance.yaml.
 # Types: str, int, list.
 # filterable_fields = <field>:<type>,...
-filterable_fields =
+filterable_fields = ${FILTERABLE_FIELDS}
 # llm_provider = huggingface
 # llm_model = provider-specific-model
 # llm_max_tokens = 256

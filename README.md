@@ -134,6 +134,13 @@ The workflow uses `HF_TOKEN` to:
 - Configure the Qdrant Space variables and secrets
 - Call the configured Hugging Face inference resources
 
+When `GENERATOR_PROVIDER="azure"`, also create a GitHub Actions repository
+secret named `AZURE_API_KEY` containing the key for your Azure resource.
+
+The workflow checks that this secret is present and copies it to the
+Orchestrator Space. `HF_TOKEN` remains required for both generator choices.
+Azure authentication never falls back to `HF_TOKEN`.
+
 The following GitHub Actions secrets are optional:
 
 - `QDRANT__SERVICE__API_KEY`
@@ -208,6 +215,62 @@ workflow combines it with `deploy.env` and generates the final
 `params.override.cfg`.
 
 Do not edit or commit a generated `params.override.cfg`.
+
+#### Choose the answer generator
+
+Configure the answer generator in section 5 of `deploy.env`.
+
+Both options keep ChatUI, Orchestrator and Qdrant on Hugging Face.
+Selecting Azure only changes where answers are generated; it does not
+create Azure resources or deploy a model.
+
+| Setting | Hugging Face | Azure |
+|---|---|---|
+| `GENERATOR_PROVIDER` | `huggingface` | `azure` |
+| `GENERATOR_MODEL` | Hugging Face model repository ID | Exact Azure deployment name |
+| `GENERATOR_INFERENCE_PROVIDER` | For example, `nscale` | `none`; ignored by Azure |
+| `GENERATOR_ORGANIZATION` | Your Hugging Face billing organization | `none`; ignored by Azure |
+| `AZURE_ENDPOINT` | Empty | Azure API base URL ending in `/openai/v1/` |
+| Required GitHub secrets | `HF_TOKEN` | `HF_TOKEN` and `AZURE_API_KEY` |
+
+For Azure, the resource and model deployment must already exist.
+
+Update all provider-specific settings together. Changing
+`GENERATOR_PROVIDER` does not automatically replace the other values.
+
+Embedding, reranking and query rewriting have separate configuration.
+Changing the answer generator does not change those services.
+
+#### Metadata settings
+
+- `CONTEXT_META_FIELDS`: metadata included in the context sent to the generator.
+  Default: `filename,project_id,document_source,document_type`.
+- `TITLE_META_FIELDS`: metadata displayed with generated answers.
+  Default: `filename,page`.
+- `FILTERABLE_FIELDS`: metadata used to filter document searches.
+  Leave empty to disable filtering. Enabling filters also requires matching
+  entries in `instance.yaml` and filter LLM configuration in the template.
+
+The workflow applies the context and title defaults when their values
+are empty or missing.
+
+#### Apply and verify changes
+
+Commit and push your changes, then start a new `Deploy ChaBo instance`
+workflow run. Select the branch containing your updated configuration.
+
+In the Hugging Face Orchestrator Space:
+
+1. Check `instance_config/params.override.cfg` for the provider, model
+   and endpoint.
+2. Check the container startup logs for the selected generator provider.
+3. Send a question through ChatUI to verify that generation works.
+
+Configuration validation checks for missing values. It does not verify
+whether Azure accepts the key, endpoint or deployment name.
+
+Both provider configurations update the same Spaces when their repository
+IDs remain unchanged. Separate Git branches do not create separate instances.
 
 ### 6. Automatic Hugging Face Space configuration
 
@@ -294,10 +357,15 @@ visibility of those Spaces.
 
 The workflow configures:
 
-- `HF_TOKEN`
-- `QDRANT_API_KEY`
+- `HF_TOKEN` from the GitHub Actions secret `HF_TOKEN`.
+- `QDRANT_API_KEY` from the same `HF_TOKEN`.
+- `AZURE_API_KEY` from the matching GitHub Actions secret, when nonempty.
 
-Both use the required GitHub Actions secret `HF_TOKEN`.
+`AZURE_API_KEY` is required when the answer generator uses Azure.
+
+The current workflow copies the Azure key whenever it is supplied,
+even if another generator is selected. Switching providers does not
+automatically delete existing Hugging Face Space secrets.
 
 #### Qdrant Space variables
 

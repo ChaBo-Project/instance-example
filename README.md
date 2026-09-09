@@ -77,10 +77,11 @@ Create a fine-grained token under:
 
 `Hugging Face → Settings → Access Tokens`
 
-Select both Space repositories:
+Select all three Space repositories:
 
-- `spaces/<organization>/<qdrant-space>`
-- `spaces/<organization>/<orchestrator-space>`
+- spaces/<organization>/<qdrant-space>
+- spaces/<organization>/<orchestrator-space>
+- spaces/<organization>/<chatui-space>
 
 For fully automatic creation, grant the token permission to create repositories
 and Collections in the target organization.

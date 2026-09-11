@@ -1,0 +1,29 @@
+name: Public repository safety
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-safety:
+    name: Public repository safety
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check tracked files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/check-public-safety.py
+          git diff --check

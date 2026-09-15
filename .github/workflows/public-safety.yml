@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -26,4 +26,48 @@ jobs:
           set -euo pipefail
 
           python3 scripts/check-public-safety.py
-          git diff --check
+
+      - name: Check committed whitespace
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          # Used when there is no previous commit available.
+          empty_tree=$(git hash-object -t tree --stdin </dev/null)
+
+          case "$EVENT_NAME" in
+            pull_request)
+              # Compare the PR base with the checked-out merge result.
+              base="$PR_BASE_SHA"
+              ;;
+            push)
+              if [[ -n "$PUSH_BEFORE_SHA" &&
+                    ! "$PUSH_BEFORE_SHA" =~ ^0+$ ]] &&
+                 git cat-file -e "${PUSH_BEFORE_SHA}^{commit}" 2>/dev/null; then
+                base="$PUSH_BEFORE_SHA"
+              else
+                # New branch or unavailable previous history:
+                # check all files in the current commit.
+                base="$empty_tree"
+              fi
+              ;;
+            workflow_dispatch)
+              # Manual run: check changes in the latest commit.
+              if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+                base=$(git rev-parse HEAD^)
+              else
+                base="$empty_tree"
+              fi
+              ;;
+            *)
+              echo "ERROR: Unsupported event: $EVENT_NAME"
+              exit 1
+              ;;
+          esac
+
+          echo "Checking whitespace between $base and HEAD"
+          git diff --check "$base" HEAD --

@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@v4
 
       - name: Check repository safety before deployment
         shell: bash
@@ -58,6 +58,7 @@ jobs:
             INSTANCE_NAME
             CHABO_TAG
             CHATUI_TAG
+            CHABO_DEPLOY_REF
             ORCHESTRATOR_HF_SPACE
             QDRANT_HF_SPACE
             CHATUI_HF_SPACE
@@ -201,6 +202,7 @@ jobs:
             echo "instance_name=$INSTANCE_NAME"
             echo "chabo_tag=$CHABO_TAG"
             echo "chatui_tag=$CHATUI_TAG"
+            echo "chabo_deploy_ref=$CHABO_DEPLOY_REF"
             echo "orchestrator_space=$ORCHESTRATOR_HF_SPACE"
             echo "qdrant_space=$QDRANT_HF_SPACE"
             echo "chatui_space=$CHATUI_HF_SPACE"
@@ -210,6 +212,14 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           echo "PASS: Deployment configuration is complete."
+
+      - name: Check out configured ChaBo-Deploy version
+        uses: actions/checkout@v4
+        with:
+          repository: ChaBo-Project/ChaBo-Deploy
+          ref: ${{ steps.config.outputs.chabo_deploy_ref }}
+          path: .chabo-deploy
+          persist-credentials: false
 
       # Reuse existing private backend Spaces or create them when permitted.
       - name: Create or verify private backend Spaces
@@ -789,9 +799,9 @@ jobs:
               print(f"PASS: Configured Qdrant secret {secret_name}.")
           PY
 
-      # All three action references must use the same pinned version.
+      # All three deployments use the version selected by CHABO_DEPLOY_REF.
       - name: Deploy orchestrator
-        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@28bee7a2ecfc989fbba28d4e1c808777b88365d2
+        uses: ./.chabo-deploy/.github/actions/deploy-hf-space
         with:
           component: orchestrator
           hf_space: ${{ steps.config.outputs.orchestrator_space }}
@@ -801,7 +811,7 @@ jobs:
           hf_token: ${{ secrets.HF_TOKEN }}
 
       - name: Deploy Qdrant
-        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@28bee7a2ecfc989fbba28d4e1c808777b88365d2
+        uses: ./.chabo-deploy/.github/actions/deploy-hf-space
         with:
           component: qdrant
           hf_space: ${{ steps.config.outputs.qdrant_space }}
@@ -809,7 +819,7 @@ jobs:
           hf_token: ${{ secrets.HF_TOKEN }}
 
       - name: Deploy ChatUI
-        uses: ChaBo-Project/ChaBo-Deploy/.github/actions/deploy-hf-space@28bee7a2ecfc989fbba28d4e1c808777b88365d2
+        uses: ./.chabo-deploy/.github/actions/deploy-hf-space
         with:
           component: chatui
           hf_space: ${{ steps.config.outputs.chatui_space }}

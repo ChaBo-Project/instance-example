@@ -222,7 +222,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+          python3 -m pip install --quiet "huggingface_hub>=1.27,<2"
 
           python3 - <<'PY'
           import os
@@ -350,7 +350,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+          python3 -m pip install --quiet "huggingface_hub>=1.27,<2"
 
           python3 - <<'PY'
           import os
@@ -470,7 +470,7 @@ jobs:
           source deploy.env
           set +a
 
-          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+          python3 -m pip install --quiet "huggingface_hub>=1.27,<2"
 
           python3 - <<'PY'
           import json
@@ -662,7 +662,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          python3 -m pip install --quiet "huggingface_hub>=0.34,<2"
+          python3 -m pip install --quiet "huggingface_hub>=1.27,<2"
 
           python3 - <<'PY'
           import os

@@ -231,6 +231,11 @@ workflow inserts the model configuration, instance name and public URL, then
 uploads the rendered content as the Hugging Face `DOTENV_LOCAL` variable.
 Never add passwords, tokens or other secrets to this public template.
 
+`chatui/PRIVACY.md` replaces the default ChatUI privacy page during deployment.
+It is an editable starting point, not completed compliance text. Before
+deploying a real instance, review the complete file and replace the AI Act
+transparency placeholder with approved instance-specific information.
+
 #### Deployment action version
 
 Set `CHABO_DEPLOY_REF` in `deploy.env` to select the ChaBo-Deploy

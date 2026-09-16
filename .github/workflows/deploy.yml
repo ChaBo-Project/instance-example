@@ -810,6 +810,7 @@ jobs:
           hf_space: ${{ steps.config.outputs.chatui_space }}
           image_tag: ${{ steps.config.outputs.chatui_tag }}
           title: "ChaBo UI — ${{ steps.config.outputs.instance_name }}"
+          extra_content_path: chatui
           hf_token: ${{ secrets.HF_TOKEN }}
 
       - name: Create or update Hugging Face Collection

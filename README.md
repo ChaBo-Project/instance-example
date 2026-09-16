@@ -174,6 +174,7 @@ Edit `deploy.env` and fill in all required public values, including:
 - `INSTANCE_NAME`
 - `CHABO_TAG`
 - `CHATUI_TAG`
+- `CHABO_DEPLOY_REF`
 - `ORCHESTRATOR_HF_SPACE`
 - `QDRANT_HF_SPACE`
 - `CHATUI_HF_SPACE`
@@ -216,6 +217,26 @@ workflow combines it with `deploy.env` and generates the final
 `params.override.cfg`.
 
 Do not edit or commit a generated `params.override.cfg`.
+
+#### Deployment action version
+
+Set `CHABO_DEPLOY_REF` in `deploy.env` to select the ChaBo-Deploy
+release used for Orchestrator, Qdrant, and ChatUI deployments.
+
+Example:
+
+```bash
+CHABO_DEPLOY_REF="hf-spaces-v0.1.0"
+```
+
+Find available releases on the
+[ChaBo-Deploy tags page](https://github.com/ChaBo-Project/ChaBo-Deploy/tags).
+
+This setting controls deployment scripts and templates.
+`CHABO_TAG` and `CHATUI_TAG` separately select the application images.
+
+To upgrade, update this value to a compatible release and test the
+deployment. This release tag does not automatically follow newer releases.
 
 #### Choose the answer generator
 

@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Check repository safety before deployment
         shell: bash
@@ -214,7 +214,7 @@ jobs:
           echo "PASS: Deployment configuration is complete."
 
       - name: Check out configured ChaBo-Deploy version
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: ChaBo-Project/ChaBo-Deploy
           ref: ${{ steps.config.outputs.chabo_deploy_ref }}

@@ -38,6 +38,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           AZURE_API_KEY: ${{ secrets.AZURE_API_KEY }}
+          MONITORING_READ_TOKEN: ${{ secrets.MONITORING_READ_TOKEN }}
           GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
@@ -135,6 +136,7 @@ jobs:
               require_value PROMETHEUS_URL
               require_value GRAFANA_HF_SPACE
               require_value GRAFANA_URL
+              require_value MONITORING_READ_TOKEN
               require_value GRAFANA_ADMIN_PASSWORD
 
               if [[ -n "${PROMETHEUS_HF_SPACE:-}" &&

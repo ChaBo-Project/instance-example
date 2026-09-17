@@ -509,6 +509,20 @@ jobs:
                   "description": (
                       "Retrieval-augmented generation powered by ChaBo."
                   ),
+                  "promptExamples": [
+                      {
+                          "title": "Who are you",
+                          "prompt": "What is this chatbot about?",
+                      },
+                      {
+                          "title": "Ask a RAG question",
+                          "prompt": "What programmes had been implemented?",
+                      },
+                      {
+                          "title": "Tell me about ChaBo",
+                          "prompt": "What is ChaBo?",
+                      },
+                  ],
                   "instructions": {
                       "title": "Instructions",
                       "content": (

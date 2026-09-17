@@ -226,10 +226,12 @@ selected Orchestrator image remains the source of truth for defaults.
 `orchestrator/instance_config/prompt_overrides.md` is based on the published
 Orchestrator example. Leave its sections empty to use the framework defaults.
 
-`chatui/env.local.template` contains the intentional ChatUI overrides. The
+`chatui/env.local.template` is based on ChaBo-ChatUI's root `.env` file and
+lists the supported settings available for instance customization. The
 workflow inserts the model configuration, instance name and public URL, then
 uploads the rendered content as the Hugging Face `DOTENV_LOCAL` variable.
-Never add passwords, tokens or other secrets to this public template.
+Re-synchronize the template with ChaBo-ChatUI whenever `CHATUI_TAG` is
+upgraded. Never add passwords, tokens or other secrets to this public file.
 
 `chatui/PRIVACY.md` replaces the default ChatUI privacy page during deployment.
 It is an editable starting point, not completed compliance text. Before

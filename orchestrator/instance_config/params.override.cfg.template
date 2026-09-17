@@ -4,7 +4,7 @@
 # instance_config.example/params.override.cfg.
 #
 # This is intentionally not a verbatim copy:
-# - Values controlled by deploy.env use ${...} placeholders.
+# - Values controlled by deploy.env use named environment placeholders.
 # - Optional upstream values remain commented so the selected image's
 #   built-in params.cfg remains authoritative.
 #

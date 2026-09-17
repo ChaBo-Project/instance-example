@@ -1,0 +1,49 @@
+global:
+  scrape_interval: __MONITORING_SCRAPE_INTERVAL__
+  scrape_timeout: 10s
+  evaluation_interval: __MONITORING_SCRAPE_INTERVAL__
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - 127.0.0.1:7860
+
+  - job_name: blackbox-exporter
+    static_configs:
+      - targets:
+          - 127.0.0.1:9115
+
+  - job_name: chabo-services
+    metrics_path: /probe
+    params:
+      module:
+        - hf_authenticated
+
+    static_configs:
+      - targets:
+          - __INSTANCE_URL__
+        labels:
+          component: orchestrator
+
+      - targets:
+          - __QDRANT_URL__
+        labels:
+          component: qdrant
+
+      - targets:
+          - __CHATUI_URL__
+        labels:
+          component: chatui
+
+    relabel_configs:
+      - source_labels:
+          - __address__
+        target_label: __param_target
+
+      - source_labels:
+          - __param_target
+        target_label: instance
+
+      - target_label: __address__
+        replacement: 127.0.0.1:9115

@@ -1,0 +1,12 @@
+modules:
+  hf_authenticated:
+    prober: http
+    timeout: 30s
+    http:
+      preferred_ip_protocol: ip4
+      follow_redirects: true
+      valid_status_codes:
+        - 200
+      authorization:
+        type: Bearer
+        credentials_file: /tmp/monitoring-read-token

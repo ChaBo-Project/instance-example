@@ -1,0 +1,2 @@
+# Keep Docker build files portable across Windows and Linux.
+monitoring/** text eol=lf

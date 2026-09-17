@@ -1,0 +1,23 @@
+apiVersion: 1
+
+deleteDatasources:
+  - name: ChaBo Prometheus
+    orgId: 1
+
+datasources:
+  - name: ChaBo Prometheus
+    uid: chabo-prometheus
+    orgId: 1
+    type: prometheus
+    access: proxy
+    url: ${PROMETHEUS_URL}
+    isDefault: true
+    editable: false
+
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+      httpHeaderName1: Authorization
+
+    secureJsonData:
+      httpHeaderValue1: Bearer ${MONITORING_READ_TOKEN}

@@ -99,3 +99,85 @@ jobs:
       - name: Remove test container
         if: always()
         run: docker rm --force chabo-prometheus-test || true
+  grafana:
+    name: Build and test Grafana
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Build Grafana image
+        run: |
+          docker build \
+            --pull \
+            --tag chabo-grafana:test \
+            monitoring/grafana
+
+      - name: Start Grafana image
+        run: |
+          docker run --detach \
+            --name chabo-grafana-test \
+            --publish 127.0.0.1:13000:7860 \
+            --env PROMETHEUS_URL=http://127.0.0.1:9090 \
+            --env MONITORING_READ_TOKEN=test-token \
+            --env GF_SECURITY_ADMIN_USER=admin \
+            --env GF_SECURITY_ADMIN_PASSWORD=test-admin-password \
+            --env GF_SERVER_ROOT_URL=http://127.0.0.1:13000 \
+            chabo-grafana:test
+
+      - name: Wait for Grafana
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..30}; do
+            if curl --fail --silent \
+              http://127.0.0.1:13000/api/health > /dev/null; then
+              echo "PASS: Grafana is ready."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "ERROR: Grafana did not become ready."
+          exit 1
+
+      - name: Verify Grafana provisioning
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          dashboard_response="$(
+            curl --fail --silent \
+              --user admin:test-admin-password \
+              "http://127.0.0.1:13000/api/search?query=ChaBo"
+          )"
+
+          jq --exit-status \
+            'any(.[]; .uid == "chabo-service-overview")' \
+            <<< "$dashboard_response" > /dev/null
+
+          datasource_response="$(
+            curl --fail --silent \
+              --user admin:test-admin-password \
+              http://127.0.0.1:13000/api/datasources/uid/chabo-prometheus
+          )"
+
+          jq --exit-status \
+            '.uid == "chabo-prometheus"
+             and .url == "http://127.0.0.1:9090"
+             and .secureJsonFields.httpHeaderValue1 == true' \
+            <<< "$datasource_response" > /dev/null
+
+          echo "PASS: Grafana dashboard and datasource are provisioned."
+
+      - name: Show Grafana logs
+        if: always()
+        run: docker logs chabo-grafana-test || true
+
+      - name: Remove Grafana test container
+        if: always()
+        run: docker rm --force chabo-grafana-test || true

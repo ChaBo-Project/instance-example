@@ -218,6 +218,26 @@ workflow combines it with `deploy.env` and generates the final
 
 Do not edit or commit a generated `params.override.cfg`.
 
+The parameter template is based on the published ChaBo-Orchestrator
+`instance_config.example/params.override.cfg`. It keeps deployment-controlled
+values as `${...}` placeholders and leaves optional settings commented so the
+selected Orchestrator image remains the source of truth for defaults.
+
+`orchestrator/instance_config/prompt_overrides.md` is based on the published
+Orchestrator example. Leave its sections empty to use the framework defaults.
+
+`chatui/env.local.template` is based on ChaBo-ChatUI's root `.env` file and
+lists the supported settings available for instance customization. The
+workflow inserts the model configuration, instance name and public URL, then
+uploads the rendered content as the Hugging Face `DOTENV_LOCAL` variable.
+Re-synchronize the template with ChaBo-ChatUI whenever `CHATUI_TAG` is
+upgraded. Never add passwords, tokens or other secrets to this public file.
+
+`chatui/PRIVACY.md` replaces the default ChatUI privacy page during deployment.
+It is an editable starting point, not completed compliance text. Before
+deploying a real instance, review the complete file and replace the AI Act
+transparency placeholder with approved instance-specific information.
+
 #### Deployment action version
 
 Set `CHABO_DEPLOY_REF` in `deploy.env` to select the ChaBo-Deploy
@@ -226,7 +246,7 @@ release used for Orchestrator, Qdrant, and ChatUI deployments.
 Example:
 
 ```bash
-CHABO_DEPLOY_REF="hf-spaces-v0.1.0"
+CHABO_DEPLOY_REF="hf-spaces-v0.2.0"
 ```
 
 Find available releases on the
@@ -432,6 +452,10 @@ Edit `orchestrator/instance_config/instance.yaml` only when the instance needs:
 
 Leave optional sections empty or commented when they are not required.
 
+Edit `orchestrator/instance_config/prompt_overrides.md` only when the instance
+needs custom query-rewriting or metadata-filter instructions. Leave both
+headings empty to use the framework defaults.
+
 ## What the deployment workflow automates
 
 The `Deploy ChaBo instance` workflow performs these operations:
@@ -439,7 +463,8 @@ The `Deploy ChaBo instance` workflow performs these operations:
 1. Validates the required public configuration and GitHub secret.
 2. Finds or creates the private Orchestrator and Qdrant Spaces.
 3. Finds or creates the ChatUI Space with the configured visibility.
-4. Configures the ChatUI Space variable and secret.
+4. Renders the ChatUI environment template and configures the resulting
+   Space variable and required secret.
 5. Generates `params.override.cfg` from `deploy.env` and
    `params.override.cfg.template`.
 6. Configures the Orchestrator Space secrets.

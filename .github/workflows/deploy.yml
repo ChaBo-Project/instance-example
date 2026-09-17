@@ -7,6 +7,7 @@ on:
       - "main"
     paths:
       - "orchestrator/**"
+      - "chatui/**"
       - "qdrant/**"
       - "scripts/**"
       - "deploy.env"
@@ -485,6 +486,8 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          from pathlib import Path
+          from string import Template
 
           from huggingface_hub import HfApi
 
@@ -506,6 +509,20 @@ jobs:
                   "description": (
                       "Retrieval-augmented generation powered by ChaBo."
                   ),
+                  "promptExamples": [
+                      {
+                          "title": "Who are you",
+                          "prompt": "What is this chatbot about?",
+                      },
+                      {
+                          "title": "Ask a RAG question",
+                          "prompt": "What programmes had been implemented?",
+                      },
+                      {
+                          "title": "Tell me about ChaBo",
+                          "prompt": "What is ChaBo?",
+                      },
+                  ],
                   "instructions": {
                       "title": "Instructions",
                       "content": (
@@ -544,33 +561,15 @@ jobs:
               }
           ]
 
-          dotenv_local = "\n".join(
-              [
-                  f"MODELS=`{json.dumps(models)}`",
-                  f"PUBLIC_ORIGIN={json.dumps(chatui_url)}",
-                  f"PUBLIC_APP_NAME={json.dumps(instance_name)}",
-                  (
-                      "PUBLIC_APP_DESCRIPTION="
-                      + json.dumps(
-                          "Retrieval-augmented assistant powered by ChaBo."
-                      )
-                  ),
-                  "PUBLIC_APP_ASSETS=chatui",
-                  "PUBLIC_APP_DISCLAIMER=1",
-                  (
-                      "PUBLIC_APP_DISCLAIMER_MESSAGE="
-                      + json.dumps(
-                          "AI-generated answers may be inaccurate. "
-                          "Do not enter sensitive personal information."
-                      )
-                  ),
-                  "ENABLE_ASSISTANTS=false",
-                  "ENABLE_ASSISTANTS_RAG=false",
-                  "COMMUNITY_TOOLS=false",
-                  "LLM_SUMMARIZATION=false",
-                  "MONGODB_URL=mongodb://localhost:27017",
-                  "",
-              ]
+          template_path = Path("chatui/env.local.template")
+          dotenv_template = Template(
+              template_path.read_text(encoding="utf-8")
+          )
+
+          dotenv_local = dotenv_template.substitute(
+              MODELS_JSON=json.dumps(models),
+              PUBLIC_ORIGIN_JSON=json.dumps(chatui_url),
+              PUBLIC_APP_NAME_JSON=json.dumps(instance_name),
           )
 
           api = HfApi(token=deploy_token)
@@ -825,6 +824,7 @@ jobs:
           hf_space: ${{ steps.config.outputs.chatui_space }}
           image_tag: ${{ steps.config.outputs.chatui_tag }}
           title: "ChaBo UI — ${{ steps.config.outputs.instance_name }}"
+          extra_content_path: chatui
           hf_token: ${{ secrets.HF_TOKEN }}
 
       - name: Create or update Hugging Face Collection

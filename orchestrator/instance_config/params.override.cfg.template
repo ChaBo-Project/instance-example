@@ -1,18 +1,22 @@
-# Tier-1 pipeline-behavior configuration template for a ChaBo instance.
+# Deployment-specific override template for a ChaBo instance.
 #
-# Layered on top of the published image's baked-in params.cfg via
-# configparser.read([base, override]) — only keys you uncomment/set here
-# override the generic default; everything else falls through unchanged.
-# Full contract: chabo/README.md's "Instance Configuration" section.
-# Every section/key below mirrors params.cfg exactly, so nothing is hidden —
-# uncomment and fill in whatever this instance actually needs to override.
+# Based on ChaBo-Orchestrator's published
+# instance_config.example/params.override.cfg.
 #
-# Sections/keys left active (not commented) are REQUIRED for a working deploy.
-# Everything commented out is optional — leave it that way to inherit the base
-# image's default, or uncomment and fill in to override it.
+# This is intentionally not a verbatim copy:
+# - Values controlled by deploy.env use named environment placeholders.
+# - Optional upstream values remain commented so the selected image's
+#   built-in params.cfg remains authoritative.
 #
-# [ragas] is intentionally not included here — it's eval-only (tests/eval/eval.py),
-# never read by the running application, so it has no place in a deploy instance's config.
+# The workflow renders this template into params.override.cfg before deployment.
+# Sections and values left commented inherit the defaults from the selected
+# Orchestrator image.
+#
+# Review this template against the upstream example whenever CHABO_TAG is
+# upgraded to a newer Orchestrator release.
+#
+# [ragas] is intentionally omitted because it is used only by evaluation tests
+# and is not read by the running application.
 
 [hf_endpoints]
 embedding_endpoint_url = ${EMBEDDING_ENDPOINT_URL}
@@ -54,6 +58,26 @@ TITLE_META_FIELDS = ${TITLE_META_FIELDS}
 
 # Required only when Azure is the generator provider.
 AZURE_ENDPOINT = ${AZURE_ENDPOINT}
+
+[api]
+# Optional frontend-agnostic API configuration.
+# Leave commented to inherit the Orchestrator image defaults.
+# model_name = chabo
+# openai_citations = true
+
+[ingestor]
+# Optional settings for documents supplied through supported upload flows.
+# Leave commented to inherit the Orchestrator image defaults.
+# chunk_size = 700
+# chunk_overlap = 50
+# max_chunks = 20
+# separators = \n\n,\n,. ,! ,? , ,
+
+[conversation_history]
+# Optional limits for conversation context.
+# Leave commented to inherit the Orchestrator image defaults.
+# MAX_TURNS = 10
+# MAX_CHARS = 20000
 
 [metadata_filters]
 # Optional feature, off by default — leaving filterable_fields empty/commented

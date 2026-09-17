@@ -278,14 +278,17 @@ jobs:
           path: .chabo-deploy
           persist-credentials: false
 
-      # Reuse existing private backend Spaces or create them when permitted.
-      - name: Create or verify private backend Spaces
+      # Reuse existing private service Spaces or create them when permitted.
+      - name: Create or verify private service Spaces
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
           QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
           HF_RESOURCE_GROUP_ID: ${{ steps.config.outputs.hf_resource_group_id }}
+          MONITORING_ENABLED: ${{ steps.config.outputs.monitoring_enabled }}
+          PROMETHEUS_HF_SPACE: ${{ steps.config.outputs.prometheus_space }}
+          GRAFANA_HF_SPACE: ${{ steps.config.outputs.grafana_space }}
         run: |
           set -euo pipefail
 
@@ -305,20 +308,43 @@ jobs:
               os.environ.get("HF_RESOURCE_GROUP_ID") or None
           )
 
-          if orchestrator_space == qdrant_space:
+          monitoring_enabled = (
+              os.environ["MONITORING_ENABLED"].lower() == "true"
+          )
+
+          private_spaces = [
+              ("Orchestrator", orchestrator_space),
+              ("Qdrant", qdrant_space),
+          ]
+
+          if monitoring_enabled:
+              private_spaces.extend(
+                  [
+                      (
+                          "Prometheus",
+                          os.environ["PROMETHEUS_HF_SPACE"],
+                      ),
+                      (
+                          "Grafana",
+                          os.environ["GRAFANA_HF_SPACE"],
+                      ),
+                  ]
+              )
+
+          space_ids = [
+              space_id
+              for _, space_id in private_spaces
+          ]
+
+          if len(space_ids) != len(set(space_ids)):
               raise ValueError(
-                  "Orchestrator and Qdrant Spaces must use different "
+                  "All private service Spaces must use different "
                   "repository IDs."
               )
 
-          backend_spaces = (
-              ("Orchestrator", orchestrator_space),
-              ("Qdrant", qdrant_space),
-          )
-
           api = HfApi(token=token)
 
-          for component_name, space_id in backend_spaces:
+          for component_name, space_id in private_spaces:
               try:
                   api.repo_info(
                       repo_id=space_id,
@@ -414,6 +440,9 @@ jobs:
           ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
           QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
           HF_RESOURCE_GROUP_ID: ${{ steps.config.outputs.hf_resource_group_id }}
+          MONITORING_ENABLED: ${{ steps.config.outputs.monitoring_enabled }}
+          PROMETHEUS_HF_SPACE: ${{ steps.config.outputs.prometheus_space }}
+          GRAFANA_HF_SPACE: ${{ steps.config.outputs.grafana_space }}
         run: |
           set -euo pipefail
 
@@ -436,15 +465,26 @@ jobs:
               os.environ.get("HF_RESOURCE_GROUP_ID") or None
           )
 
-          backend_spaces = {
+          other_spaces = {
               os.environ["ORCHESTRATOR_HF_SPACE"],
               os.environ["QDRANT_HF_SPACE"],
           }
 
-          if chatui_space in backend_spaces:
+          monitoring_enabled = (
+              os.environ["MONITORING_ENABLED"].lower() == "true"
+          )
+
+          if monitoring_enabled:
+              other_spaces.update(
+                  {
+                      os.environ["PROMETHEUS_HF_SPACE"],
+                      os.environ["GRAFANA_HF_SPACE"],
+                  }
+              )
+
+          if chatui_space in other_spaces:
               raise ValueError(
-                  "CHATUI_HF_SPACE must not match the "
-                  "Orchestrator or Qdrant Space."
+                  "CHATUI_HF_SPACE must not match another configured Space."
               )
 
           api = HfApi(token=token)

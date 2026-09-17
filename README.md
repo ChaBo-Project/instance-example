@@ -244,7 +244,7 @@ release used for Orchestrator, Qdrant, and ChatUI deployments.
 Example:
 
 ```bash
-CHABO_DEPLOY_REF="hf-spaces-v0.1.0"
+CHABO_DEPLOY_REF="hf-spaces-v0.2.0"
 ```
 
 Find available releases on the

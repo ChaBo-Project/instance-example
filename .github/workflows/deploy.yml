@@ -12,6 +12,7 @@ on:
       - "scripts/**"
       - "deploy.env"
       - ".github/workflows/deploy.yml"
+      - "monitoring/**"
 
 jobs:
   deploy:
@@ -37,6 +38,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           AZURE_API_KEY: ${{ secrets.AZURE_API_KEY }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -83,6 +85,10 @@ jobs:
             GENERATOR_MAX_TOKENS
             GENERATOR_TEMPERATURE
             QUERY_REWRITER_ENABLED
+            MONITORING_ENABLED
+            MONITORING_HF_SPACES_PRIVATE
+            MONITORING_SCRAPE_INTERVAL
+            PROMETHEUS_RETENTION_TIME
           )
 
           for variable_name in "${required_variables[@]}"; do
@@ -119,6 +125,47 @@ jobs:
             *)
               errors+=(
                 "QUERY_REWRITER_ENABLED must be either true or false."
+              )
+              ;;
+          esac
+
+          case "${MONITORING_ENABLED:-}" in
+            true)
+              require_value PROMETHEUS_HF_SPACE
+              require_value PROMETHEUS_URL
+              require_value GRAFANA_HF_SPACE
+              require_value GRAFANA_URL
+              require_value GRAFANA_ADMIN_PASSWORD
+
+              if [[ -n "${PROMETHEUS_HF_SPACE:-}" &&
+                    -n "${GRAFANA_HF_SPACE:-}" &&
+                    "${PROMETHEUS_HF_SPACE}" == "${GRAFANA_HF_SPACE}" ]]; then
+                errors+=(
+                  "PROMETHEUS_HF_SPACE and GRAFANA_HF_SPACE must use different repository IDs."
+                )
+              fi
+              ;;
+            false)
+              ;;
+            "")
+              # Already reported as a missing variable.
+              ;;
+            *)
+              errors+=(
+                "MONITORING_ENABLED must be either true or false."
+              )
+              ;;
+          esac
+
+          case "${MONITORING_HF_SPACES_PRIVATE:-}" in
+            true)
+              ;;
+            "")
+              # Already reported as a missing variable.
+              ;;
+            *)
+              errors+=(
+                "MONITORING_HF_SPACES_PRIVATE must be true because monitoring contains operational information."
               )
               ;;
           esac
@@ -210,6 +257,13 @@ jobs:
             echo "chatui_space_private=$CHATUI_HF_SPACE_PRIVATE"
             echo "chatui_url=$CHATUI_URL"
             echo "hf_resource_group_id=${HF_RESOURCE_GROUP_ID:-}"
+            echo "monitoring_enabled=$MONITORING_ENABLED"
+            echo "prometheus_space=${PROMETHEUS_HF_SPACE:-}"
+            echo "prometheus_url=${PROMETHEUS_URL:-}"
+            echo "grafana_space=${GRAFANA_HF_SPACE:-}"
+            echo "grafana_url=${GRAFANA_URL:-}"
+            echo "monitoring_scrape_interval=$MONITORING_SCRAPE_INTERVAL"
+            echo "prometheus_retention_time=$PROMETHEUS_RETENTION_TIME"
           } >> "$GITHUB_OUTPUT"
 
           echo "PASS: Deployment configuration is complete."

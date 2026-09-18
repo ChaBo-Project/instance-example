@@ -502,72 +502,14 @@ jobs:
           instance_url = os.environ["INSTANCE_URL"].rstrip("/")
           instance_name = os.environ["INSTANCE_NAME"]
 
-          models = [
-              {
-                  "name": "ChaBo",
-                  "displayName": f"{instance_name} Assistant",
-                  "description": (
-                      "Retrieval-augmented generation powered by ChaBo."
-                  ),
-                  "promptExamples": [
-                      {
-                          "title": "Who are you",
-                          "prompt": "What is this chatbot about?",
-                      },
-                      {
-                          "title": "Ask a RAG question",
-                          "prompt": "What programmes had been implemented?",
-                      },
-                      {
-                          "title": "Tell me about ChaBo",
-                          "prompt": "What is ChaBo?",
-                      },
-                  ],
-                  "instructions": {
-                      "title": "Instructions",
-                      "content": (
-                          "Ask questions about the available documents. "
-                          "Answers may include source citations."
-                      ),
-                  },
-                  "multimodal": True,
-                  "multimodalAcceptedMimetypes": [
-                      "application/pdf",
-                  ],
-                  "chatPromptTemplate": (
-                      "{{#each messages}}"
-                      "{{#ifUser}}{{content}}{{/ifUser}}"
-                      "{{#ifAssistant}}{{content}}{{/ifAssistant}}"
-                      "{{/each}}"
-                  ),
-                  "parameters": {
-                      "temperature": 0.0,
-                      "max_new_tokens": 2048,
-                  },
-                  "endpoints": [
-                      {
-                          "type": "langserve-streaming",
-                          "url": (
-                              f"{instance_url}/chatfed-ui-stream"
-                          ),
-                          "streamingFileUploadUrl": (
-                              f"{instance_url}/"
-                              "chatfed-with-file-stream"
-                          ),
-                          "inputKey": "text",
-                          "fileInputKey": "files",
-                      }
-                  ],
-              }
-          ]
-
           template_path = Path("chatui/env.local.template")
           dotenv_template = Template(
               template_path.read_text(encoding="utf-8")
           )
 
           dotenv_local = dotenv_template.substitute(
-              MODELS_JSON=json.dumps(models),
+              INSTANCE_NAME=instance_name,
+              INSTANCE_URL=instance_url,
               PUBLIC_ORIGIN_JSON=json.dumps(chatui_url),
               PUBLIC_APP_NAME_JSON=json.dumps(instance_name),
           )

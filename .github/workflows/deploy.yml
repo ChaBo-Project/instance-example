@@ -1001,7 +1001,7 @@ jobs:
           print("PASS: Monitoring Spaces configured.")
           PY
 
-      # All three deployments use the version selected by CHABO_DEPLOY_REF.
+      # The three core deployments use the version selected by CHABO_DEPLOY_REF.
       - name: Deploy orchestrator
         uses: ./.chabo-deploy/.github/actions/deploy-hf-space
         with:
@@ -1029,6 +1029,62 @@ jobs:
           title: "ChaBo UI — ${{ steps.config.outputs.instance_name }}"
           extra_content_path: chatui
           hf_token: ${{ secrets.HF_TOKEN }}
+
+      # Upload the monitoring Docker Space sources only when monitoring is enabled.
+      - name: Deploy monitoring Spaces
+        if: steps.config.outputs.monitoring_enabled == 'true'
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          PROMETHEUS_HF_SPACE: ${{ steps.config.outputs.prometheus_space }}
+          GRAFANA_HF_SPACE: ${{ steps.config.outputs.grafana_space }}
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install --quiet "huggingface_hub>=1.27,<2"
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+
+          deployments = (
+              (
+                  "Prometheus",
+                  os.environ["PROMETHEUS_HF_SPACE"],
+                  Path("monitoring/prometheus"),
+              ),
+              (
+                  "Grafana",
+                  os.environ["GRAFANA_HF_SPACE"],
+                  Path("monitoring/grafana"),
+              ),
+          )
+
+          for component_name, space_id, source_directory in deployments:
+              if not source_directory.is_dir():
+                  raise FileNotFoundError(
+                      f"Missing {component_name} source directory: "
+                      f"{source_directory}"
+                  )
+
+              api.upload_folder(
+                  repo_id=space_id,
+                  repo_type="space",
+                  folder_path=source_directory,
+                  commit_message=(
+                      f"Deploy ChaBo {component_name} monitoring"
+                  ),
+              )
+
+              print(
+                  f"PASS: Deployed {component_name} source to "
+                  f"{space_id}."
+              )
+          PY
 
       - name: Create or update Hugging Face Collection
         shell: bash

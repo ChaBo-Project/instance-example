@@ -32,7 +32,8 @@ The Dataset must contain the columns expected by the Qdrant initialization
 process, including the document ID, vector, and payload metadata.
 
 The workflow finds or creates a Hugging Face Collection that groups the three
-Spaces and the embeddings Dataset.
+core Spaces and the embeddings Dataset. When monitoring is enabled, the private
+Prometheus and Grafana Spaces are also added.
 
 If the token cannot create Collections, create it manually using the exact
 `HF_COLLECTION_TITLE`. Set `HF_COLLECTION_PRIVATE="false"` for a public
@@ -42,15 +43,25 @@ and cannot be created.
 The Hugging Face Collection is different from the Qdrant collection configured
 through `COLLECTION_NAME`.
 
-### 2. Create or verify the private backend Spaces
+### 2. Create or verify the private service Spaces
 
-The workflow checks these backend Spaces before configuration and deployment:
+The workflow always checks these private service Spaces before configuration
+and deployment:
 
 1. Orchestrator Space
 2. Qdrant Space
 
-The repository IDs must match `ORCHESTRATOR_HF_SPACE` and `QDRANT_HF_SPACE`
-in `deploy.env`.
+When `MONITORING_ENABLED="true"`, it also checks:
+
+3. Prometheus Space
+4. Grafana Space
+
+The repository IDs must match the corresponding values in `deploy.env`:
+
+- `ORCHESTRATOR_HF_SPACE`
+- `QDRANT_HF_SPACE`
+- `PROMETHEUS_HF_SPACE`, when monitoring is enabled
+- `GRAFANA_HF_SPACE`, when monitoring is enabled
 
 If a Space exists, the workflow reuses it and enforces private visibility.
 
@@ -66,10 +77,12 @@ with:
 - An empty repository
 - The Resource Group configured through `HF_RESOURCE_GROUP_ID`, when set
 
-The token must have read and write access to both Spaces. The workflow stops
-with an explanation if a Space is missing, inaccessible, or cannot be created.
+The token must have read and write access to every configured service Space.
+The workflow stops with an explanation if a Space is missing, inaccessible, or
+cannot be created.
 
 `HF_SPACES_PRIVATE` must remain set to `true`.
+`MONITORING_HF_SPACES_PRIVATE` must also remain set to `true`.
 
 ### 3. Create a fine-grained Hugging Face token
 
@@ -77,11 +90,17 @@ Create a fine-grained token under:
 
 `Hugging Face → Settings → Access Tokens`
 
-Select all three Space repositories:
+Select all three core Space repositories:
 
-- spaces/<organization>/<qdrant-space>
-- spaces/<organization>/<orchestrator-space>
-- spaces/<organization>/<chatui-space>
+- `spaces/<organization>/<qdrant-space>`
+- `spaces/<organization>/<orchestrator-space>`
+- `spaces/<organization>/<chatui-space>`
+
+When monitoring is enabled and the monitoring Spaces already exist, also
+select:
+
+- `spaces/<organization>/<prometheus-space>`
+- `spaces/<organization>/<grafana-space>`
 
 For fully automatic creation, grant the token permission to create repositories
 and Collections in the target organization.
@@ -91,10 +110,11 @@ to create and update resources inside that Enterprise Resource Group.
 
 If these creation permissions cannot be granted, manually create the private
 Orchestrator and Qdrant Spaces, the configured public or private ChatUI Space,
-and the Hugging Face Collection before running the workflow.
+and the Hugging Face Collection before running the workflow. When monitoring is
+enabled, also manually create the private Prometheus and Grafana Spaces.
 
-In both modes, the token must have write access to the three Spaces and the
-Collection so the workflow can configure and update them.
+In both modes, the token must have write access to every configured Space and
+the Collection so the workflow can configure and update them.
 
 Enable these repository permissions:
 
@@ -128,11 +148,15 @@ The workflow uses `HF_TOKEN` to:
 
 - Find or create the private Orchestrator and Qdrant Spaces
 - Find or create the ChatUI Space with the configured visibility
+- Find or create the private Prometheus and Grafana Spaces when monitoring is
+  enabled
 - Find or create the Hugging Face Collection
-- Push content to all three Hugging Face Spaces
+- Push content to the three core Hugging Face Spaces
+- Push the monitoring sources when monitoring is enabled
 - Configure the ChatUI Space variable and secret
 - Configure the Orchestrator Space secrets
 - Configure the Qdrant Space variables and secrets
+- Configure the monitoring Space variables and secrets when enabled
 - Call the configured Hugging Face inference resources
 
 When `GENERATOR_PROVIDER="azure"`, also create a GitHub Actions repository
@@ -141,6 +165,21 @@ secret named `AZURE_API_KEY` containing the key for your Azure resource.
 The workflow checks that this secret is present and copies it to the
 Orchestrator Space. `HF_TOKEN` remains required for both generator choices.
 Azure authentication never falls back to `HF_TOKEN`.
+
+When `MONITORING_ENABLED="true"`, these additional GitHub Actions repository
+secrets are required:
+
+- `MONITORING_READ_TOKEN`: a dedicated fine-grained, read-only Hugging Face
+  token with access to Prometheus and every private Space that Prometheus
+  monitors.
+- `GRAFANA_ADMIN_PASSWORD`: a strong, unique Grafana administrator password.
+
+The workflow stores `MONITORING_READ_TOKEN` as a private secret in both
+monitoring Spaces. It stores `GRAFANA_ADMIN_PASSWORD` in the Grafana Space as
+`GF_SECURITY_ADMIN_PASSWORD`.
+
+Monitoring credentials do not fall back to `HF_TOKEN`. The deployment stops
+when monitoring is enabled and either required secret is missing.
 
 The following GitHub Actions secrets are optional:
 
@@ -185,6 +224,10 @@ Edit `deploy.env` and fill in all required public values, including:
 - `CHATUI_URL`
 - `HF_COLLECTION_TITLE`
 - `HF_COLLECTION_PRIVATE`
+- `MONITORING_ENABLED`
+- `MONITORING_HF_SPACES_PRIVATE`
+- `MONITORING_SCRAPE_INTERVAL`
+- `PROMETHEUS_RETENTION_TIME`
 - `EMBEDDING_ENDPOINT_URL`
 - `RERANKER_ENDPOINT_URL`
 - `EMBEDDING_DATASET`
@@ -204,6 +247,41 @@ access to the Space.
 This setting is independent of `HF_COLLECTION_PRIVATE`. For example, the
 ChatUI Space can be private while the Hugging Face Collection remains public.
 Adding a private Space to a public Collection does not make the Space public.
+
+Monitoring is disabled by default:
+
+```bash
+MONITORING_ENABLED="false"
+```
+
+When monitoring is disabled, the Prometheus and Grafana repository IDs and URLs
+may remain empty.
+
+To enable monitoring, set:
+
+```bash
+MONITORING_ENABLED="true"
+```
+
+Then configure:
+
+- `PROMETHEUS_HF_SPACE`
+- `PROMETHEUS_URL`
+- `GRAFANA_HF_SPACE`
+- `GRAFANA_URL`
+
+Prometheus and Grafana must use different repository IDs, and neither ID may
+match the Orchestrator, Qdrant or ChatUI Space.
+
+`MONITORING_HF_SPACES_PRIVATE` must remain set to `"true"` because monitoring
+contains operational information.
+
+`MONITORING_SCRAPE_INTERVAL` controls how frequently Prometheus checks the
+ChaBo endpoints. `PROMETHEUS_RETENTION_TIME` controls how long Prometheus keeps
+the collected data.
+
+Prometheus data is temporary unless a writable Hugging Face storage bucket is
+attached to the Prometheus Space and mounted at `/prometheus`.
 
 `HF_RESOURCE_GROUP_ID` is optional. Set it to the 24-character hexadecimal ID
 from the Hugging Face Enterprise Resource Group page when resources must be
@@ -385,6 +463,11 @@ The workflow adds:
 - The ChatUI Space
 - The embeddings Dataset
 
+When monitoring is enabled, it also adds:
+
+- The private Prometheus Space
+- The private Grafana Space
+
 Existing items are not duplicated. The token must have write access to the
 Collection so its visibility and items can be updated.
 
@@ -439,6 +522,46 @@ For each secret:
 Secret values are never stored in `deploy.env` and are not printed in the
 workflow logs.
 
+#### Prometheus and Grafana Spaces
+
+This configuration runs only when `MONITORING_ENABLED="true"`.
+
+The workflow creates or reuses both monitoring Spaces, enforces private
+visibility, configures their runtime settings and uploads the Docker Space
+sources.
+
+The Prometheus Space receives these public variables:
+
+- `INSTANCE_URL`
+- `QDRANT_URL`
+- `CHATUI_URL`
+- `MONITORING_SCRAPE_INTERVAL`
+- `PROMETHEUS_RETENTION_TIME`
+
+It receives `MONITORING_READ_TOKEN` as a private Space secret. Prometheus uses
+this token when checking private ChaBo endpoints.
+
+The Grafana Space receives these public variables:
+
+- `PROMETHEUS_URL`
+- `GF_SERVER_ROOT_URL`
+
+It receives these private Space secrets:
+
+- `MONITORING_READ_TOKEN`
+- `GF_SECURITY_ADMIN_PASSWORD`
+
+Grafana uses `MONITORING_READ_TOKEN` to query the private Prometheus Space.
+Anonymous access and user registration are disabled.
+
+The workflow uploads:
+
+- `monitoring/prometheus` to the Prometheus Space
+- `monitoring/grafana` to the Grafana Space
+
+The provisioned Grafana dashboard displays endpoint availability, response
+time, TLS certificate validity and HTTP status information.
+
 ### 7. Complete optional instance configuration manually
 
 This step is not automated.
@@ -460,8 +583,9 @@ headings empty to use the framework defaults.
 
 The `Deploy ChaBo instance` workflow performs these operations:
 
-1. Validates the required public configuration and GitHub secret.
-2. Finds or creates the private Orchestrator and Qdrant Spaces.
+1. Validates the required public configuration and GitHub secrets.
+2. Finds or creates the private Orchestrator and Qdrant Spaces and, when
+   enabled, the private Prometheus and Grafana Spaces.
 3. Finds or creates the ChatUI Space with the configured visibility.
 4. Renders the ChatUI environment template and configures the resulting
    Space variable and required secret.
@@ -470,20 +594,27 @@ The `Deploy ChaBo instance` workflow performs these operations:
 6. Configures the Orchestrator Space secrets.
 7. Configures the selected Qdrant Space variables.
 8. Configures the Qdrant Space secrets, including fallback handling.
-9. Deploys the Orchestrator Space.
-10. Deploys the Qdrant Space.
-11. Deploys the ChatUI Space.
-12. Finds or creates the Hugging Face Collection and adds the deployment
-    resources.
+9. Configures the Prometheus and Grafana variables and secrets when monitoring
+   is enabled.
+10. Deploys the Orchestrator Space.
+11. Deploys the Qdrant Space.
+12. Deploys the ChatUI Space.
+13. Uploads the Prometheus and Grafana Docker Space sources when monitoring is
+    enabled.
+14. Finds or creates the Hugging Face Collection and adds the core deployment
+    resources and, when enabled, the monitoring Spaces.
 
 The following prerequisites remain manual:
 
 - Create or verify the embeddings Dataset.
 - Create a fine-grained Hugging Face token with write access to the deployment
   resources.
-- Either grant repository and Collection creation permissions or manually create
-  the three Spaces and Hugging Face Collection.
-- Add the token to GitHub Actions.
+- Either grant repository and Collection creation permissions or manually
+  create the three core Spaces, the optional monitoring Spaces when enabled,
+  and the Hugging Face Collection.
+- Add `HF_TOKEN` to GitHub Actions.
+- When monitoring is enabled, add `MONITORING_READ_TOKEN` and
+  `GRAFANA_ADMIN_PASSWORD` to GitHub Actions.
 - Complete the public values in `deploy.env`.
 - Optionally configure `instance.yaml`.
 - Start the workflow through GitHub Actions or merge the changes into a

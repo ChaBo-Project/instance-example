@@ -894,6 +894,113 @@ jobs:
               print(f"PASS: Configured Qdrant secret {secret_name}.")
           PY
 
+      # Configure monitoring only when it is explicitly enabled.
+      # Secret values are stored as Hugging Face Space secrets and never printed.
+      - name: Configure monitoring Spaces
+        if: steps.config.outputs.monitoring_enabled == 'true'
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          MONITORING_READ_TOKEN: ${{ secrets.MONITORING_READ_TOKEN }}
+          GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          PROMETHEUS_HF_SPACE: ${{ steps.config.outputs.prometheus_space }}
+          GRAFANA_HF_SPACE: ${{ steps.config.outputs.grafana_space }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          python3 -m pip install --quiet "huggingface_hub>=1.27,<2"
+
+          python3 - <<'PY'
+          import os
+
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+
+          prometheus_space = os.environ["PROMETHEUS_HF_SPACE"]
+          grafana_space = os.environ["GRAFANA_HF_SPACE"]
+
+          space_variables = {
+              prometheus_space: {
+                  "INSTANCE_URL": os.environ["INSTANCE_URL"],
+                  "QDRANT_URL": os.environ["QDRANT_URL"],
+                  "CHATUI_URL": os.environ["CHATUI_URL"],
+                  "MONITORING_SCRAPE_INTERVAL": os.environ[
+                      "MONITORING_SCRAPE_INTERVAL"
+                  ],
+                  "PROMETHEUS_RETENTION_TIME": os.environ[
+                      "PROMETHEUS_RETENTION_TIME"
+                  ],
+              },
+              grafana_space: {
+                  "PROMETHEUS_URL": os.environ["PROMETHEUS_URL"],
+                  "GF_SERVER_ROOT_URL": os.environ["GRAFANA_URL"],
+              },
+          }
+
+          space_secrets = {
+              prometheus_space: {
+                  "MONITORING_READ_TOKEN": os.environ[
+                      "MONITORING_READ_TOKEN"
+                  ],
+              },
+              grafana_space: {
+                  "MONITORING_READ_TOKEN": os.environ[
+                      "MONITORING_READ_TOKEN"
+                  ],
+                  "GF_SECURITY_ADMIN_PASSWORD": os.environ[
+                      "GRAFANA_ADMIN_PASSWORD"
+                  ],
+              },
+          }
+
+          for space, variables in space_variables.items():
+              existing_secrets = api.get_space_secrets(repo_id=space)
+
+              for variable_name, variable_value in variables.items():
+                  if variable_name in existing_secrets:
+                      api.delete_space_secret(
+                          repo_id=space,
+                          key=variable_name,
+                      )
+
+                  api.add_space_variable(
+                      repo_id=space,
+                      key=variable_name,
+                      value=variable_value,
+                  )
+                  print(
+                      f"PASS: Configured variable {variable_name} "
+                      f"for {space}."
+                  )
+
+          for space, secrets in space_secrets.items():
+              existing_variables = api.get_space_variables(repo_id=space)
+
+              for secret_name, secret_value in secrets.items():
+                  if secret_name in existing_variables:
+                      api.delete_space_variable(
+                          repo_id=space,
+                          key=secret_name,
+                      )
+
+                  api.add_space_secret(
+                      repo_id=space,
+                      key=secret_name,
+                      value=secret_value,
+                  )
+                  print(
+                      f"PASS: Configured secret {secret_name} "
+                      f"for {space}."
+                  )
+
+          print("PASS: Monitoring Spaces configured.")
+          PY
+
       # All three deployments use the version selected by CHABO_DEPLOY_REF.
       - name: Deploy orchestrator
         uses: ./.chabo-deploy/.github/actions/deploy-hf-space

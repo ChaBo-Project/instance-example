@@ -1201,12 +1201,30 @@ jobs:
 
               raise
 
-          items = (
+          items = [
               (os.environ["ORCHESTRATOR_HF_SPACE"], "space"),
               (os.environ["QDRANT_HF_SPACE"], "space"),
               (chatui_space, "space"),
               (os.environ["EMBEDDING_DATASET"], "dataset"),
+          ]
+
+          monitoring_enabled = (
+              os.environ["MONITORING_ENABLED"].lower() == "true"
           )
+
+          if monitoring_enabled:
+              items.extend(
+                  [
+                      (
+                          os.environ["PROMETHEUS_HF_SPACE"],
+                          "space",
+                      ),
+                      (
+                          os.environ["GRAFANA_HF_SPACE"],
+                          "space",
+                      ),
+                  ]
+              )
 
           for item_id, item_type in items:
               try:

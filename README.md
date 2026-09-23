@@ -17,6 +17,20 @@ API calls.
 Real deployment configuration belongs only in private instance repositories.
 Secrets must be stored in GitHub Actions secrets.
 
+## Updating an existing instance
+
+A product owner can update an existing instance repository from this public
+template by manually running the `Update from instance-example` workflow in the
+target repository.
+
+The workflow preserves the target's `deploy.env` and complete Git history. It
+compares `deploy.env` variable names and reports required manual configuration
+without displaying values. It creates a separate update branch and provides a
+link for creating a reviewed pull request.
+
+See [Template synchronization](docs/template-synchronization.md) for setup,
+operation, security, and review instructions.
+
 ### 1. Create or verify the embeddings Dataset
 
 Create the Hugging Face Dataset repository containing the embedded documents,

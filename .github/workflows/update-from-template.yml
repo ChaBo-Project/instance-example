@@ -1,0 +1,192 @@
+name: Update from instance-example
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Release tag, commit SHA, or branch to synchronize
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-from-instance-example-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository != 'ChaBo-Project/instance-example'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out target repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          path: target
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Check out public source template
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ChaBo-Project/instance-example
+          ref: ${{ inputs.source_ref }}
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record source and target versions
+        id: versions
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+
+          source_sha="$(git -C source rev-parse HEAD)"
+          target_base_sha="$(git -C target rev-parse HEAD)"
+          short_source_sha="${source_sha:0:12}"
+
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "target_base_sha=$target_base_sha" >> "$GITHUB_OUTPUT"
+          echo "short_source_sha=$short_source_sha" >> "$GITHUB_OUTPUT"
+
+          echo "INFO: Source ref: $SOURCE_REF"
+          echo "INFO: Source commit: $source_sha"
+          echo "INFO: Target base commit: $target_base_sha"
+
+      - name: Synchronize shared template files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 target/scripts/sync-template.py \
+            --github-summary "$GITHUB_STEP_SUMMARY" \
+            source \
+            target
+
+      - name: Check for synchronized changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "$(git -C target status --porcelain)" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "INFO: Template changes are ready."
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "INFO: The target already matches the selected source version."
+          fi
+
+      - name: Report no changes
+        if: steps.changes.outputs.has_changes == 'false'
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          SOURCE_SHA: ${{ steps.versions.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## No template update required"
+            echo
+            echo "The target already matches the selected source version."
+            echo
+            echo "- Source ref: \`$SOURCE_REF\`"
+            echo "- Source commit: \`$SOURCE_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create and push update branch
+        id: branch
+        if: steps.changes.outputs.has_changes == 'true'
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          SOURCE_SHA: ${{ steps.versions.outputs.source_sha }}
+          SHORT_SOURCE_SHA: ${{ steps.versions.outputs.short_source_sha }}
+          TARGET_BASE_SHA: ${{ steps.versions.outputs.target_base_sha }}
+        run: |
+          set -euo pipefail
+
+          branch_name="chore/update-instance-example-$SHORT_SOURCE_SHA"
+          echo "name=$branch_name" >> "$GITHUB_OUTPUT"
+
+          if git -C target ls-remote \
+            --exit-code \
+            --heads \
+            origin \
+            "$branch_name" > /dev/null 2>&1; then
+            echo "existing=true" >> "$GITHUB_OUTPUT"
+            echo "INFO: Update branch already exists: $branch_name"
+            exit 0
+          fi
+
+          echo "existing=false" >> "$GITHUB_OUTPUT"
+
+          git -C target switch -c "$branch_name"
+          git -C target config \
+            user.name \
+            "github-actions[bot]"
+          git -C target config \
+            user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git -C target add --all
+
+          if ! git -C target diff --cached --quiet -- deploy.env; then
+            echo "ERROR: deploy.env was staged for modification."
+            exit 1
+          fi
+
+          git -C target commit \
+            -m "chore: update from instance-example at $SHORT_SOURCE_SHA" \
+            -m "Source repository: https://github.com/ChaBo-Project/instance-example" \
+            -m "Source ref: $SOURCE_REF" \
+            -m "Source commit: $SOURCE_SHA" \
+            -m "Target base commit: $TARGET_BASE_SHA"
+
+          git -C target push \
+            --set-upstream \
+            origin \
+            "$branch_name"
+
+          echo "PASS: Update branch created and pushed."
+
+      - name: Provide pull request link
+        if: steps.changes.outputs.has_changes == 'true'
+        shell: bash
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          SOURCE_SHA: ${{ steps.versions.outputs.source_sha }}
+          TARGET_BASE_SHA: ${{ steps.versions.outputs.target_base_sha }}
+          BRANCH_NAME: ${{ steps.branch.outputs.name }}
+          BRANCH_EXISTED: ${{ steps.branch.outputs.existing }}
+        run: |
+          set -euo pipefail
+
+          compare_url="https://github.com/${GITHUB_REPOSITORY}/compare/main...${BRANCH_NAME}?expand=1"
+
+          {
+            echo "## Template update branch ready"
+            echo
+            echo "- Source repository: \`ChaBo-Project/instance-example\`"
+            echo "- Source ref: \`$SOURCE_REF\`"
+            echo "- Source commit: \`$SOURCE_SHA\`"
+            echo "- Target base commit: \`$TARGET_BASE_SHA\`"
+            echo "- Update branch: \`$BRANCH_NAME\`"
+            echo "- Branch already existed: \`$BRANCH_EXISTED\`"
+            echo
+            echo "The target \`deploy.env\` was preserved."
+            echo
+            echo "### Next step"
+            echo
+            echo "[Open the comparison and create the pull request]($compare_url)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "PASS: Open this page to create the pull request:"
+          echo "$compare_url"

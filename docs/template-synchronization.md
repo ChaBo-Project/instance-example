@@ -206,51 +206,47 @@ Product owners must therefore review every generated comparison and pull request
 
 ## Authentication
 
-No GitHub App private key or personal access token is required for this workflow.
+Reading the source repository requires no credentials because
+`ChaBo-Project/instance-example` is public.
 
-Reading the source repository requires no credentials because the source is public.
+Pushing an update branch requires a dedicated, least-privilege GitHub App.
+This is necessary because template updates may modify files under
+`.github/workflows/`. GitHub does not allow the target repository's built-in
+`GITHUB_TOKEN` to push those workflow-file changes.
 
-The workflow uses the target repository's temporary `GITHUB_TOKEN` only to create and push the update branch inside that same target repository.
+The GitHub App must have only these repository permissions:
 
-The token is not committed to the repository and is not displayed in the workflow output.
+- Contents: Read and write
+- Workflows: Read and write
+- Metadata: Read-only, granted automatically
 
-The workflow does not use the token to merge changes.
+The App does not require pull-request, administration, secrets, deployment, or
+merge permissions.
 
-## Required target repository settings
+Install the App only on the productive instance repositories that use template
+synchronization. The App does not need access to the public source repository.
 
-GitHub Actions must be enabled in the target repository.
+The workflow creates a short-lived installation token for the current target
+repository. The token is automatically revoked when the workflow job finishes.
 
-The workflow requests:
+The token is used only to:
 
-```yaml
-permissions:
-  contents: write
-```
+- check out the target repository;
+- create the synchronization branch;
+- push the synchronization commit.
 
-This permission is used only to push the update branch.
+The workflow does not use the token to create, approve, or merge a pull request.
 
-Repository or organization policy must allow the workflow's `GITHUB_TOKEN` to write repository contents.
+## Required target repository secrets
 
-The workflow does not request permission to approve or merge pull requests.
+Store the GitHub App credentials only as encrypted GitHub Actions secrets in
+each target repository.
 
-## Installing the workflow in a target repository
-
-New repositories created from the updated template receive the workflow and synchronization scripts automatically.
-
-An existing target repository must receive these files once through a reviewed pull request:
-
-```text
-.github/workflows/update-from-template.yml
-scripts/sync-template.py
-```
-
-The target should also receive:
+Create these repository secrets:
 
 ```text
-scripts/test-sync-template.py
-```
-
-After that initial pull request is merged, the product owner can start future updates from the target repository's Actions page.
+INSTANCE_SYNC_APP_ID
+INSTANCE_SYNC_APP_PRIVATE_KEY
 
 ## Traceability
 
@@ -342,11 +338,17 @@ deploy.env
 
 Check:
 
-1. the target repository's **Settings**;
-2. **Actions**;
-3. **General**;
-4. **Workflow permissions**;
-5. organization policies that may prevent `contents: write`.
+1. the GitHub App is installed on the target repository;
+2. the installation includes this repository under **Only select repositories**;
+3. the App has **Contents: Read and write**;
+4. the App has **Workflows: Read and write**;
+5. the `INSTANCE_SYNC_APP_ID` Actions secret exists;
+6. the `INSTANCE_SYNC_APP_PRIVATE_KEY` Actions secret exists;
+7. the stored private key belongs to the configured App;
+8. repository or organization rules allow the App to create update branches.
+
+If the App permissions were changed after installation, review and approve the
+updated installation permissions before running the workflow again.
 
 ### Update branch already exists
 

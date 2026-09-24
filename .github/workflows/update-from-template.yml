@@ -10,7 +10,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: update-from-instance-example-${{ github.repository }}
@@ -22,10 +22,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Create target repository token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ secrets.INSTANCE_SYNC_APP_ID }}
+          private-key: ${{ secrets.INSTANCE_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-workflows: write
+
       - name: Check out target repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: main
+          token: ${{ steps.app-token.outputs.token }}
           path: target
           fetch-depth: 0
           persist-credentials: true

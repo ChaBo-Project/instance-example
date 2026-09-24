@@ -26,7 +26,9 @@ target repository.
 The workflow preserves the target's `deploy.env` and complete Git history. It
 compares `deploy.env` variable names and reports required manual configuration
 without displaying values. It creates a separate update branch and provides a
-link for creating a reviewed pull request.
+link for creating a reviewed pull request. Pushing update branches, including
+GitHub Actions workflow changes, uses a least-privilege GitHub App installed
+only on registered target repositories.
 
 See [Template synchronization](docs/template-synchronization.md) for setup,
 operation, security, and review instructions.

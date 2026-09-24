@@ -1,8 +1,10 @@
 # Template synchronization
 
-Product owners can update their ChaBo instance repository from the public `ChaBo-Project/instance-example` repository when they are ready.
+Product owners can update their ChaBo instance repository from the public
+`ChaBo-Project/instance-example` repository when they are ready.
 
-Updates are not pushed centrally to all instance repositories. Each product owner starts the update workflow from their own target repository.
+Updates are not pushed centrally to all instance repositories. Each product
+owner starts the update workflow from their own target repository.
 
 No Git CLI commands are required on the product owner's computer.
 
@@ -14,7 +16,8 @@ The target repository contains the workflow:
 .github/workflows/update-from-template.yml
 ```
 
-The product owner starts this workflow manually from the target repository's GitHub Actions page.
+The product owner starts this workflow manually from the target repository's
+GitHub Actions page.
 
 The workflow:
 
@@ -26,7 +29,8 @@ The workflow:
 6. pushes the update branch to the target repository;
 7. provides a GitHub comparison link.
 
-The product owner uses the comparison link to create a pull request through the GitHub website.
+The product owner uses the comparison link to create a pull request through the
+GitHub website.
 
 The workflow never merges the pull request automatically.
 
@@ -60,7 +64,8 @@ Example:
 v1.2.0
 ```
 
-This ensures that the same template version can be reviewed and applied again later.
+This ensures that the same template version can be reviewed and applied again
+later.
 
 ### Exact commit SHA
 
@@ -80,9 +85,11 @@ Use:
 main
 ```
 
-to synchronize the latest commit currently available on the source repository's `main` branch.
+to synchronize the latest commit currently available on the source
+repository's `main` branch.
 
-The `main` branch and the latest published release are not necessarily the same version. A release tag is preferred for productive updates.
+The `main` branch and the latest published release are not necessarily the same
+version. A release tag is preferred for productive updates.
 
 ## Starting an update
 
@@ -99,7 +106,8 @@ In the target repository:
 9. Read the workflow summary.
 10. Select **Open the comparison and create the pull request**.
 
-The comparison page shows the proposed changes before the pull request is created.
+The comparison page shows the proposed changes before the pull request is
+created.
 
 ## Creating the pull request
 
@@ -120,7 +128,8 @@ On the comparison page:
 8. Request the normal review.
 9. Merge only after the checks and review pass.
 
-The pull request is created manually so that the target repository's normal pull-request workflows run.
+The pull request is created manually so that the target repository's normal
+pull-request workflows run.
 
 ## Repository history preservation
 
@@ -157,7 +166,8 @@ deploy.env
 
 The workflow verifies that `deploy.env` remains unchanged.
 
-If `deploy.env` does not exist in the target repository root, synchronization stops with an error.
+If `deploy.env` does not exist in the target repository root, synchronization
+stops with an error.
 
 ## deploy.env compatibility report
 
@@ -200,9 +210,11 @@ The synchronization supports:
 - directory-to-file changes;
 - symbolic links.
 
-A file that exists only in the target repository is proposed for deletion unless it is `.git` or `deploy.env`.
+A file that exists only in the target repository is proposed for deletion
+unless it is `.git` or `deploy.env`.
 
-Product owners must therefore review every generated comparison and pull request for unintended deletion of target-specific files.
+Product owners must therefore review every generated comparison and pull
+request for unintended deletion of target-specific files.
 
 ## Authentication
 
@@ -247,6 +259,89 @@ Create these repository secrets:
 ```text
 INSTANCE_SYNC_APP_ID
 INSTANCE_SYNC_APP_PRIVATE_KEY
+```
+
+`INSTANCE_SYNC_APP_ID` contains the numeric GitHub App ID.
+
+`INSTANCE_SYNC_APP_PRIVATE_KEY` contains the complete private key, including
+the `BEGIN` and `END` lines.
+
+Never store the private key in:
+
+- the repository;
+- `deploy.env`;
+- workflow variables;
+- documentation;
+- workflow output;
+- commits or pull requests.
+
+GitHub does not display a secret's value after it has been stored.
+
+## Required target repository settings
+
+GitHub Actions must be enabled in the target repository.
+
+The workflow's built-in `GITHUB_TOKEN` receives only:
+
+```yaml
+permissions:
+  contents: read
+```
+
+The separate GitHub App token receives only:
+
+```yaml
+permission-contents: write
+permission-workflows: write
+```
+
+These permissions allow the workflow to push an update branch containing
+ordinary files and GitHub Actions workflow files.
+
+The workflow does not request permission to approve or merge pull requests.
+
+## Installing synchronization in a target repository
+
+New repositories created from the updated template receive the workflow and
+synchronization scripts automatically.
+
+An existing target repository must receive these files once through a reviewed
+pull request:
+
+```text
+.github/workflows/update-from-template.yml
+scripts/sync-template.py
+scripts/test-sync-template.py
+```
+
+The target repository should also receive the template's `.gitattributes`,
+`.gitignore`, and public-safety workflow changes.
+
+Before running synchronization for the first time:
+
+1. install the GitHub App on the target repository;
+2. select only the target repositories that require synchronization;
+3. add `INSTANCE_SYNC_APP_ID` as an Actions repository secret;
+4. add `INSTANCE_SYNC_APP_PRIVATE_KEY` as an Actions repository secret;
+5. confirm that the App has Contents and Workflows read/write permissions;
+6. approve updated App permissions if the App was changed after installation;
+7. confirm that normal pull-request review is required before changes reach
+   `main`.
+
+After the initial pull request is merged, the product owner can start future
+updates from the target repository's Actions page.
+
+## Registering another target repository
+
+To enable another productive instance repository:
+
+1. add the repository to the GitHub App installation's selected repositories;
+2. install the synchronization files through a reviewed pull request;
+3. add the two required Actions secrets to the target repository;
+4. run the workflow manually with a published release tag or exact source
+   commit;
+5. review the generated comparison and create a pull request;
+6. merge only after the target repository's required checks and review pass.
 
 ## Traceability
 
@@ -259,7 +354,8 @@ Every synchronization commit records:
 
 The workflow summary also displays this information.
 
-The update branch name includes the first 12 characters of the source commit SHA.
+The update branch name includes the first 12 characters of the source commit
+SHA.
 
 Example:
 
@@ -269,11 +365,14 @@ chore/update-instance-example-0123456789ab
 
 ## Existing update branch
 
-If an update branch for the selected source commit already exists, the workflow does not force-push or replace it.
+If an update branch for the selected source commit already exists, the workflow
+does not force-push or replace it.
 
-The workflow reports that the branch already exists and provides the comparison link again.
+The workflow reports that the branch already exists and provides the comparison
+link again.
 
-If the existing branch is no longer wanted, a maintainer should review it and delete it through the GitHub website before running the same update again.
+If the existing branch is no longer wanted, a maintainer should review it and
+delete it through the GitHub website before running the same update again.
 
 ## No-change update
 
@@ -301,7 +400,8 @@ The tests cover:
 - identical source and target directories;
 - permission failures.
 
-After the product owner creates the pull request, the target repository's normal pull-request checks also run.
+After the product owner creates the pull request, the target repository's normal
+pull-request checks also run.
 
 ## Reviewing an update
 
@@ -320,11 +420,13 @@ Never merge an update pull request automatically.
 
 ## Troubleshooting
 
-Open the target repository's **Actions** page and select the failed **Update from instance-example** run.
+Open the target repository's **Actions** page and select the failed
+**Update from instance-example** run.
 
 ### Source reference not found
 
-Confirm that the entered release tag, commit SHA, or branch exists in the public source repository.
+Confirm that the entered release tag, commit SHA, or branch exists in the public
+source repository.
 
 ### Missing deploy.env
 
@@ -339,7 +441,8 @@ deploy.env
 Check:
 
 1. the GitHub App is installed on the target repository;
-2. the installation includes this repository under **Only select repositories**;
+2. the installation includes this repository under
+   **Only select repositories**;
 3. the App has **Contents: Read and write**;
 4. the App has **Workflows: Read and write**;
 5. the `INSTANCE_SYNC_APP_ID` Actions secret exists;
@@ -354,10 +457,12 @@ updated installation permissions before running the workflow again.
 
 Open the branch using the comparison link shown in the workflow summary.
 
-Review the existing branch, create its pull request, or delete the branch through GitHub before rerunning the same source version.
+Review the existing branch, create its pull request, or delete the branch
+through GitHub before rerunning the same source version.
 
 ### Target-specific file is proposed for deletion
 
 Do not merge the pull request until the file is reviewed.
 
-If the file must remain target-specific, the synchronization design must be updated to protect it explicitly.
+If the file must remain target-specific, the synchronization design must be
+updated to protect it explicitly.

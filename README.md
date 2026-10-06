@@ -135,7 +135,7 @@ The workflow uses `HF_TOKEN` to:
 - Configure the Qdrant Space variables and secrets
 - Call the configured Hugging Face inference resources
 
-When `GENERATOR_PROVIDER="azure"`, also create a GitHub Actions repository
+When `[generator] PROVIDER = azure` in `params.override.cfg.template`, also create a GitHub Actions repository
 secret named `AZURE_API_KEY` containing the key for your Azure resource.
 
 The workflow checks that this secret is present and copies it to the
@@ -185,12 +185,13 @@ Edit `deploy.env` and fill in all required public values, including:
 - `CHATUI_URL`
 - `HF_COLLECTION_TITLE`
 - `HF_COLLECTION_PRIVATE`
-- `EMBEDDING_ENDPOINT_URL`
-- `RERANKER_ENDPOINT_URL`
 - `EMBEDDING_DATASET`
 - `COLLECTION_NAME`
 - `EMBEDDING_DIMENSION`
-- Generator settings
+
+Then edit `orchestrator/instance_config/params.override.cfg.template` and fill
+in the keys marked "Required": the embedding and reranker endpoints and the
+generator settings.
 
 Set `CHATUI_HF_SPACE_PRIVATE` to control the visibility of the ChatUI Space:
 
@@ -212,16 +213,19 @@ created inside that group.
 Leave it empty when the organization does not use Resource Groups or when the
 token has the required organization-wide permissions.
 
-`params.override.cfg.template` contains variable placeholders. The deployment
-workflow combines it with `deploy.env` and generates the final
-`params.override.cfg`.
+`params.override.cfg.template` holds the orchestrator pipeline settings, edited
+directly in the file. A few values shared with the workflow and the Qdrant Space
+(`QDRANT_URL`, `COLLECTION_NAME`, `FILTERABLE_FIELDS`) are `${...}` placeholders
+filled from `deploy.env`; leave those as they are. The deployment workflow
+renders the final `params.override.cfg` and validates it before making any
+Hugging Face changes.
 
 Do not edit or commit a generated `params.override.cfg`.
 
 The parameter template is based on the published ChaBo-Orchestrator
-`instance_config.example/params.override.cfg`. It keeps deployment-controlled
-values as `${...}` placeholders and leaves optional settings commented so the
-selected Orchestrator image remains the source of truth for defaults.
+`instance_config.example/params.override.cfg`. It leaves optional settings
+commented so the selected Orchestrator image remains the source of truth for
+defaults.
 
 `orchestrator/instance_config/prompt_overrides.md` is based on the published
 Orchestrator example. Leave its sections empty to use the framework defaults.
@@ -260,7 +264,8 @@ deployment. This release tag does not automatically follow newer releases.
 
 #### Choose the answer generator
 
-Configure the answer generator in section 5 of `deploy.env`.
+Configure the answer generator in the `[generator]` section of
+`params.override.cfg.template`.
 
 Both options keep ChatUI, Orchestrator and Qdrant on Hugging Face.
 Selecting Azure only changes where answers are generated; it does not
@@ -268,33 +273,31 @@ create Azure resources or deploy a model.
 
 | Setting | Hugging Face | Azure |
 |---|---|---|
-| `GENERATOR_PROVIDER` | `huggingface` | `azure` |
-| `GENERATOR_MODEL` | Hugging Face model repository ID | Exact Azure deployment name |
-| `GENERATOR_INFERENCE_PROVIDER` | For example, `nscale` | `none`; ignored by Azure |
-| `GENERATOR_ORGANIZATION` | Your Hugging Face billing organization | `none`; ignored by Azure |
+| `PROVIDER` | `huggingface` | `azure` |
+| `MODEL` | Hugging Face model repository ID | Exact Azure deployment name |
+| `INFERENCE_PROVIDER` | For example, `nscale` | Empty; ignored by Azure |
+| `ORGANIZATION` | Your Hugging Face billing organization | Empty; ignored by Azure |
 | `AZURE_ENDPOINT` | Empty | Azure API base URL ending in `/openai/v1/` |
 | Required GitHub secrets | `HF_TOKEN` | `HF_TOKEN` and `AZURE_API_KEY` |
 
 For Azure, the resource and model deployment must already exist.
 
 Update all provider-specific settings together. Changing
-`GENERATOR_PROVIDER` does not automatically replace the other values.
+`PROVIDER` does not automatically replace the other values.
 
 Embedding, reranking and query rewriting have separate configuration.
 Changing the answer generator does not change those services.
 
 #### Metadata settings
 
-- `CONTEXT_META_FIELDS`: metadata included in the context sent to the generator.
+- `CONTEXT_META_FIELDS` (`[generator]` in the template): metadata included in
+  the context sent to the generator.
   Default: `filename,project_id,document_source,document_type`.
-- `TITLE_META_FIELDS`: metadata displayed with generated answers.
-  Default: `filename,page`.
-- `FILTERABLE_FIELDS`: metadata used to filter document searches.
+- `TITLE_META_FIELDS` (`[generator]` in the template): metadata displayed with
+  generated answers. Default: `filename,page`.
+- `FILTERABLE_FIELDS` (`deploy.env`): metadata used to filter document searches.
   Leave empty to disable filtering. Enabling filters also requires matching
   entries in `instance.yaml` and filter LLM configuration in the template.
-
-The workflow applies the context and title defaults when their values
-are empty or missing.
 
 #### Apply and verify changes
 

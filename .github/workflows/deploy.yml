@@ -36,7 +36,6 @@ jobs:
         shell: bash
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          AZURE_API_KEY: ${{ secrets.AZURE_API_KEY }}
         run: |
           set -euo pipefail
 
@@ -70,58 +69,17 @@ jobs:
             CHATUI_URL
             HF_COLLECTION_TITLE
             HF_COLLECTION_PRIVATE
-            EMBEDDING_ENDPOINT_URL
-            RERANKER_ENDPOINT_URL
             EMBEDDING_DATASET
             COLLECTION_NAME
             EMBEDDING_DIMENSION
             VECTOR_COLUMN_NAME
             BATCH_SIZE
             TOP_K
-            GENERATOR_PROVIDER
-            GENERATOR_MODEL
-            GENERATOR_MAX_TOKENS
-            GENERATOR_TEMPERATURE
-            QUERY_REWRITER_ENABLED
           )
 
           for variable_name in "${required_variables[@]}"; do
             require_value "$variable_name"
           done
-
-          if [[ "${GENERATOR_PROVIDER:-}" == "huggingface" ]]; then
-            require_value GENERATOR_INFERENCE_PROVIDER
-            require_value GENERATOR_ORGANIZATION
-          fi
-
-          if [[ "${GENERATOR_PROVIDER:-}" == "azure" ]]; then
-            require_value AZURE_ENDPOINT
-            require_value AZURE_API_KEY
-          fi
-
-          case "${QUERY_REWRITER_ENABLED:-}" in
-            true)
-              require_value QUERY_REWRITER_LLM_PROVIDER
-              require_value QUERY_REWRITER_LLM_MODEL
-              require_value QUERY_REWRITER_LLM_MAX_TOKENS
-              require_value QUERY_REWRITER_LLM_TEMPERATURE
-
-              if [[ "${QUERY_REWRITER_LLM_PROVIDER:-}" == "huggingface" ]]; then
-                require_value QUERY_REWRITER_LLM_INFERENCE_PROVIDER
-                require_value QUERY_REWRITER_LLM_ORGANIZATION
-              fi
-              ;;
-            false)
-              ;;
-            "")
-              # Already reported as a missing variable.
-              ;;
-            *)
-              errors+=(
-                "QUERY_REWRITER_ENABLED must be either true or false."
-              )
-              ;;
-          esac
 
           case "${HF_COLLECTION_PRIVATE:-}" in
             true|false)
@@ -213,6 +171,43 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           echo "PASS: Deployment configuration is complete."
+
+      # Generate and validate the real params.override.cfg used by the orchestrator
+      # before any Hugging Face changes are made.
+      # The template itself is not copied into the rendered deployment directory.
+      - name: Render and validate orchestrator configuration
+        shell: bash
+        env:
+          AZURE_API_KEY: ${{ secrets.AZURE_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          rendered_directory=".rendered/orchestrator/instance_config"
+
+          mkdir -p "$rendered_directory"
+
+          cp \
+            orchestrator/instance_config/instance.yaml \
+            "$rendered_directory/instance.yaml"
+
+          python3 scripts/render-config.py \
+            orchestrator/instance_config/params.override.cfg.template \
+            "$rendered_directory/params.override.cfg"
+
+          test -s "$rendered_directory/params.override.cfg"
+
+          if grep -nE '\$\{[A-Z][A-Z0-9_]*\}' \
+            "$rendered_directory/params.override.cfg"; then
+            echo "ERROR: Unresolved variables remain in params.override.cfg."
+            exit 1
+          fi
+
+          python3 scripts/validate-config.py \
+            "$rendered_directory/params.override.cfg"
 
       - name: Check out configured ChaBo-Deploy version
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -563,44 +558,6 @@ jobs:
 
           print("PASS: ChatUI Space configured.")
           PY
-
-      # Generate the real params.override.cfg used by the orchestrator.
-      # The template itself is not copied into the rendered deployment directory.
-      - name: Render orchestrator configuration
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          set -a
-          source deploy.env
-          set +a
-
-          # Use existing defaults when these optional settings are empty or missing.
-          export CONTEXT_META_FIELDS="${CONTEXT_META_FIELDS:-filename,project_id,document_source,document_type}"
-          export TITLE_META_FIELDS="${TITLE_META_FIELDS:-filename,page}"
-          export FILTERABLE_FIELDS="${FILTERABLE_FIELDS:-}"
-
-          rendered_directory=".rendered/orchestrator/instance_config"
-
-          mkdir -p "$rendered_directory"
-
-          cp \
-            orchestrator/instance_config/instance.yaml \
-            "$rendered_directory/instance.yaml"
-
-          python3 scripts/render-config.py \
-            orchestrator/instance_config/params.override.cfg.template \
-            "$rendered_directory/params.override.cfg"
-
-          test -s "$rendered_directory/params.override.cfg"
-
-          if grep -nE '\$\{[A-Z][A-Z0-9_]*\}' \
-            "$rendered_directory/params.override.cfg"; then
-            echo "ERROR: Unresolved variables remain in params.override.cfg."
-            exit 1
-          fi
-
-          echo "PASS: Orchestrator configuration rendered successfully."
 
       # Configure runtime authentication without storing secret values in this repository.
       # Hugging Face restarts the Space automatically when a secret is updated.

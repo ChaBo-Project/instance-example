@@ -4,9 +4,14 @@
 # instance_config.example/params.override.cfg.
 #
 # This is intentionally not a verbatim copy:
-# - Values controlled by deploy.env use named environment placeholders.
+# - Values shared with the workflow or the Qdrant Space use named
+#   placeholders filled from deploy.env. Do not replace them here.
+# - All other values are edited directly in this file.
 # - Optional upstream values remain commented so the selected image's
 #   built-in params.cfg remains authoritative.
+#
+# Keys marked "Required" are checked after rendering; deployment stops
+# before any Hugging Face change if one is empty.
 #
 # The workflow renders this template into params.override.cfg before deployment.
 # Sections and values left commented inherit the defaults from the selected
@@ -19,8 +24,10 @@
 # and is not read by the running application.
 
 [hf_endpoints]
-embedding_endpoint_url = ${EMBEDDING_ENDPOINT_URL}
-reranker_endpoint_url = ${RERANKER_ENDPOINT_URL}
+# Required. Example: https://embedding-endpoint.example.com
+embedding_endpoint_url =
+# Required. Example: https://reranker-endpoint.example.com
+reranker_endpoint_url =
 
 [qdrant]
 mode = gradio
@@ -43,21 +50,30 @@ port = 443
 # rrf_k = 60
 
 [generator]
-PROVIDER = ${GENERATOR_PROVIDER}
-MODEL = ${GENERATOR_MODEL}
-MAX_TOKENS = ${GENERATOR_MAX_TOKENS}
-TEMPERATURE = ${GENERATOR_TEMPERATURE}
-CONTEXT_META_FIELDS = ${CONTEXT_META_FIELDS}
+# Required. Examples: huggingface, openai, anthropic, cohere or azure
+PROVIDER = huggingface
+# Required. Hugging Face model repository ID, or the exact Azure deployment name.
+# Example: Qwen/Qwen3-235B-A22B-Instruct-2507
+MODEL =
+# Required.
+MAX_TOKENS = 1024
+# Required.
+TEMPERATURE = 0.1
+# Metadata included in the context sent to the answer generator.
+CONTEXT_META_FIELDS = filename,project_id,document_source,document_type
 
-# These values are required when Hugging Face is the generator provider.
-INFERENCE_PROVIDER = ${GENERATOR_INFERENCE_PROVIDER}
-ORGANIZATION = ${GENERATOR_ORGANIZATION}
+# Required when PROVIDER is huggingface. Example: nscale
+INFERENCE_PROVIDER =
+# Required when PROVIDER is huggingface. Your Hugging Face billing organization.
+ORGANIZATION =
 
 # Metadata fields displayed with generated answers.
-TITLE_META_FIELDS = ${TITLE_META_FIELDS}
+TITLE_META_FIELDS = filename,page
 
-# Required only when Azure is the generator provider.
-AZURE_ENDPOINT = ${AZURE_ENDPOINT}
+# Required when PROVIDER is azure: API base URL ending in /openai/v1/.
+# Example: https://your-resource.services.ai.azure.com/openai/v1/
+# Also requires the GitHub Actions secret AZURE_API_KEY.
+AZURE_ENDPOINT =
 
 [api]
 # Optional frontend-agnostic API configuration.
@@ -95,20 +111,21 @@ filterable_fields = ${FILTERABLE_FIELDS}
 # llm_organization = <required for huggingface
 
 [query_rewriter]
-# Set QUERY_REWRITER_ENABLED=false in deploy.env to disable this feature.
-enabled = ${QUERY_REWRITER_ENABLED}
+# Required: true or false.
+enabled = false
 
 # Empty means that no cross-language rewriting is performed.
 # target_language =
 
-llm_provider = ${QUERY_REWRITER_LLM_PROVIDER}
-llm_model = ${QUERY_REWRITER_LLM_MODEL}
-llm_max_tokens = ${QUERY_REWRITER_LLM_MAX_TOKENS}
-llm_temperature = ${QUERY_REWRITER_LLM_TEMPERATURE}
+# The values below are required when enabled = true.
+llm_provider = huggingface
+llm_model =
+llm_max_tokens = 256
+llm_temperature = 0.1
 
-# Required when Hugging Face is the query-rewriter provider.
-llm_inference_provider = ${QUERY_REWRITER_LLM_INFERENCE_PROVIDER}
-llm_organization = ${QUERY_REWRITER_LLM_ORGANIZATION}
+# Required when enabled = true and llm_provider is huggingface.
+llm_inference_provider =
+llm_organization =
 
 # Query-rewriter grounding is configured in instance.yaml under db_context.
 

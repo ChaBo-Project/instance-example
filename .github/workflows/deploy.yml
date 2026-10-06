@@ -121,14 +121,6 @@ jobs:
               ;;
           esac
 
-          if [[ -n "${HF_RESOURCE_GROUP_ID:-}" &&
-                ! "${HF_RESOURCE_GROUP_ID}" =~ ^[0-9a-fA-F]{24}$ ]]; then
-            errors+=(
-              "HF_RESOURCE_GROUP_ID must be empty or a 24-character "
-              "hexadecimal Resource Group ID."
-            )
-          fi
-
           if [[ -z "${HF_TOKEN:-}" ]]; then
             errors+=(
               "GitHub Actions secret HF_TOKEN is missing."
@@ -167,7 +159,6 @@ jobs:
             echo "chatui_space=$CHATUI_HF_SPACE"
             echo "chatui_space_private=$CHATUI_HF_SPACE_PRIVATE"
             echo "chatui_url=$CHATUI_URL"
-            echo "hf_resource_group_id=${HF_RESOURCE_GROUP_ID:-}"
           } >> "$GITHUB_OUTPUT"
 
           echo "PASS: Deployment configuration is complete."
@@ -224,7 +215,6 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
           QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
-          HF_RESOURCE_GROUP_ID: ${{ steps.config.outputs.hf_resource_group_id }}
         run: |
           set -euo pipefail
 
@@ -239,10 +229,6 @@ jobs:
           token = os.environ["HF_TOKEN"]
           orchestrator_space = os.environ["ORCHESTRATOR_HF_SPACE"]
           qdrant_space = os.environ["QDRANT_HF_SPACE"]
-
-          resource_group_id = (
-              os.environ.get("HF_RESOURCE_GROUP_ID") or None
-          )
 
           if orchestrator_space == qdrant_space:
               raise ValueError(
@@ -274,12 +260,8 @@ jobs:
                       None,
                   )
 
-                  if status_code != 404:
-                      raise RuntimeError(
-                          f"Unable to verify whether the {component_name} "
-                          f"Space {space_id} exists. Check HF_TOKEN access "
-                          "to the target organization."
-                      ) from error
+                  if status_code not in (401, 403, 404):
+                      raise
 
                   try:
                       api.create_repo(
@@ -287,7 +269,6 @@ jobs:
                           repo_type="space",
                           space_sdk="docker",
                           visibility="private",
-                          resource_group_id=resource_group_id,
                           exist_ok=True,
                       )
                       print(
@@ -305,11 +286,10 @@ jobs:
                           raise RuntimeError(
                               f"{component_name} Space {space_id} is "
                               "missing or inaccessible, and HF_TOKEN "
-                              "cannot create it. Either grant repository-"
-                              "creation permission to HF_TOKEN or manually "
-                              "create this Space with Docker SDK and private "
-                              "visibility. Then grant HF_TOKEN read and write "
-                              "access to the Space and run the workflow again."
+                              "cannot create it. For the first deployment, "
+                              "grant HF_TOKEN write access to repos in the "
+                              "organization; afterwards, grant it write "
+                              "access to this Space."
                           ) from create_error
 
                       raise
@@ -352,7 +332,6 @@ jobs:
           CHATUI_HF_SPACE_PRIVATE: ${{ steps.config.outputs.chatui_space_private }}
           ORCHESTRATOR_HF_SPACE: ${{ steps.config.outputs.orchestrator_space }}
           QDRANT_HF_SPACE: ${{ steps.config.outputs.qdrant_space }}
-          HF_RESOURCE_GROUP_ID: ${{ steps.config.outputs.hf_resource_group_id }}
         run: |
           set -euo pipefail
 
@@ -370,10 +349,6 @@ jobs:
               os.environ["CHATUI_HF_SPACE_PRIVATE"].lower() == "true"
           )
           visibility = "private" if chatui_private else "public"
-
-          resource_group_id = (
-              os.environ.get("HF_RESOURCE_GROUP_ID") or None
-          )
 
           backend_spaces = {
               os.environ["ORCHESTRATOR_HF_SPACE"],
@@ -397,11 +372,8 @@ jobs:
           except HfHubHTTPError as error:
               status_code = getattr(error.response, "status_code", None)
 
-              if status_code != 404:
-                  raise RuntimeError(
-                      "Unable to verify whether the ChatUI Space exists. "
-                      "Check HF_TOKEN access to the target organization."
-                  ) from error
+              if status_code not in (401, 403, 404):
+                  raise
 
               try:
                   api.create_repo(
@@ -409,7 +381,6 @@ jobs:
                       repo_type="space",
                       space_sdk="docker",
                       visibility=visibility,
-                      resource_group_id=resource_group_id,
                       exist_ok=True,
                   )
                   print(
@@ -423,13 +394,13 @@ jobs:
                       None,
                   )
 
-                  if create_status in (401, 403):
+                  if create_status in (401, 403, 409):
                       raise RuntimeError(
-                          f"ChatUI Space {chatui_space} does not exist and "
-                          "HF_TOKEN cannot create it. Either grant repository-"
-                          "creation permission to HF_TOKEN or manually create "
-                          f"this Space with Docker SDK and {visibility} "
-                          "visibility."
+                          f"ChatUI Space {chatui_space} is missing or "
+                          "inaccessible, and HF_TOKEN cannot create it. For the "
+                          "first deployment, grant HF_TOKEN write access to "
+                          "repos in the organization; afterwards, grant it "
+                          "write access to this Space."
                       ) from create_error
 
                   raise
@@ -749,10 +720,6 @@ jobs:
               os.environ["HF_COLLECTION_PRIVATE"].lower() == "true"
           )
 
-          resource_group_id = (
-              os.environ.get("HF_RESOURCE_GROUP_ID") or None
-          )
-
           chatui_space = os.environ["CHATUI_HF_SPACE"]
 
           if "/" not in chatui_space:
@@ -791,7 +758,6 @@ jobs:
                       title=collection_title,
                       namespace=collection_namespace,
                       private=collection_private,
-                      resource_group_id=resource_group_id,
                       exists_ok=True,
                   )
                   print(
@@ -806,15 +772,11 @@ jobs:
                   )
 
                   if create_status in (401, 403):
-                      visibility = (
-                          "private" if collection_private else "public"
-                      )
                       raise RuntimeError(
                           f"Hugging Face Collection {collection_title!r} "
                           f"does not exist under {collection_namespace}, and "
-                          "HF_TOKEN cannot create it. Either grant Collection "
-                          "creation permission to HF_TOKEN or manually create "
-                          f"a {visibility} Collection with this exact title."
+                          "HF_TOKEN cannot create it. Grant HF_TOKEN "
+                          "Collections write access in that organization."
                       ) from create_error
 
                   raise
@@ -841,6 +803,8 @@ jobs:
 
               raise
 
+          # A failed item add only warns: an admin can add missing items after
+          # the first deploy.
           items = (
               (os.environ["ORCHESTRATOR_HF_SPACE"], "space"),
               (os.environ["QDRANT_HF_SPACE"], "space"),
@@ -863,18 +827,13 @@ jobs:
                       None,
                   )
 
-                  if item_status in (401, 403):
-                      raise RuntimeError(
-                          f"Collection {collection.slug} exists, but HF_TOKEN "
-                          "cannot add deployment resources. Grant the token "
-                          "write access to this Collection."
-                      ) from item_error
-
-                  if item_status == 404:
-                      raise RuntimeError(
-                          f"Cannot add {item_type} {item_id} because Hugging "
-                          "Face could not find or access that resource."
-                      ) from item_error
+                  if item_status in (401, 403, 404):
+                      print(
+                          f"::warning::Could not add {item_type} {item_id} "
+                          f"to Collection {collection.slug} (HTTP "
+                          f"{item_status}). An admin can add it manually."
+                      )
+                      continue
 
                   raise
 

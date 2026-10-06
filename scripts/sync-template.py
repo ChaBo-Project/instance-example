@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 
+"""Update an instance repository from instance-example.
+
+Only the infrastructure files in MANAGED_PATHS are copied. Every other file
+is instance-specific: it is never written, and the template's changes to it
+are reported so the owner can port them by hand.
+"""
+
 from __future__ import annotations
 
 import argparse
+import difflib
 import os
 import re
 import shutil
@@ -11,100 +19,180 @@ from pathlib import Path
 
 
 DEPLOY_ENV = Path("deploy.env")
+TEMPLATE_VERSION = Path(".template-version")
+
+# Files that are identical in every instance and safe to overwrite.
+MANAGED_PATHS = (
+    Path(".gitattributes"),
+    Path(".gitignore"),
+    Path(".github/workflows/deploy.yml"),
+    Path(".github/workflows/public-safety.yml"),
+    Path(".github/workflows/update-from-template.yml"),
+    Path("docs/template-synchronization.md"),
+    Path("scripts/check-public-safety.py"),
+    Path("scripts/render-config.py"),
+    Path("scripts/sync-template.py"),
+    Path("scripts/test-sync-template.py"),
+    Path("scripts/validate-config.py"),
+)
+
+EXCLUDED_FROM_REPORT = {DEPLOY_ENV, TEMPLATE_VERSION, *MANAGED_PATHS}
+
 ENV_ASSIGNMENT_PATTERN = re.compile(
     r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*="
 )
 
-
-def path_exists(path: Path) -> bool:
-    """Return true for normal paths and broken symbolic links."""
-    return path.exists() or path.is_symlink()
+MAX_DIFF_LINES_PER_FILE = 300
 
 
-def repository_paths(root: Path) -> dict[Path, Path]:
-    """Return repository paths without entering the root .git directory."""
-    paths: dict[Path, Path] = {}
+def repository_files(root: Path) -> set[Path]:
+    """Return relative file paths, skipping the root .git entry.
 
-    for current_root, directory_names, file_names in os.walk(
-        root,
-        topdown=True,
-        followlinks=False,
-    ):
+    .git is a directory in a normal checkout and a file in a git worktree.
+    """
+    files: set[Path] = set()
+
+    for current_root, directory_names, file_names in os.walk(root):
         current_path = Path(current_root)
-        relative_root = current_path.relative_to(root)
 
-        if relative_root == Path("."):
+        if current_path == root:
             directory_names[:] = [
                 name for name in directory_names if name != ".git"
             ]
-
-        for directory_name in directory_names:
-            path = current_path / directory_name
-            paths[path.relative_to(root)] = path
+            file_names = [name for name in file_names if name != ".git"]
 
         for file_name in file_names:
-            path = current_path / file_name
-            paths[path.relative_to(root)] = path
+            files.add((current_path / file_name).relative_to(root))
 
-    return paths
-
-
-def remove_path(path: Path) -> None:
-    """Remove one file, symbolic link, or directory."""
-    if path.is_symlink() or path.is_file():
-        path.unlink()
-    elif path.is_dir():
-        shutil.rmtree(path)
-    elif path_exists(path):
-        path.unlink()
-    else:
-        raise FileNotFoundError(f"Path does not exist: {path}")
+    return files
 
 
-def copy_path(source: Path, target: Path) -> None:
-    """Copy one repository path while handling file-type changes."""
-    target.parent.mkdir(parents=True, exist_ok=True)
+def read_bytes(path: Path) -> bytes | None:
+    return path.read_bytes() if path.is_file() else None
 
-    if source.is_symlink():
-        if path_exists(target):
-            remove_path(target)
 
-        target.symlink_to(
-            os.readlink(source),
-            target_is_directory=source.is_dir(),
+def synchronize_managed_files(source: Path, target: Path) -> list[str]:
+    """Copy managed files; remove those the source no longer has."""
+    changes: list[str] = []
+
+    for relative_path in MANAGED_PATHS:
+        source_path = source / relative_path
+        target_path = target / relative_path
+
+        if source_path.is_file():
+            if read_bytes(target_path) == source_path.read_bytes():
+                continue
+
+            action = "updated" if target_path.exists() else "added"
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, target_path)
+            changes.append(f"{action} `{relative_path}`")
+        elif target_path.is_file():
+            target_path.unlink()
+            changes.append(f"removed `{relative_path}`")
+
+    return changes
+
+
+def unified_diff(old: bytes | None, new: bytes | None, path: Path) -> str:
+    try:
+        old_lines = (old or b"").decode("utf-8").splitlines(keepends=True)
+        new_lines = (new or b"").decode("utf-8").splitlines(keepends=True)
+    except UnicodeDecodeError:
+        return "(binary file, diff not shown)\n"
+
+    lines = list(
+        difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
         )
-        return
+    )
 
-    if source.is_dir():
-        if path_exists(target) and (
-            target.is_symlink() or not target.is_dir()
-        ):
-            remove_path(target)
+    if len(lines) > MAX_DIFF_LINES_PER_FILE:
+        omitted = len(lines) - MAX_DIFF_LINES_PER_FILE
+        lines = lines[:MAX_DIFF_LINES_PER_FILE]
+        lines.append(f"\n... {omitted} more diff lines not shown\n")
 
-        target.mkdir(parents=True, exist_ok=True)
-        return
+    return "".join(
+        line if line.endswith("\n") else line + "\n" for line in lines
+    )
 
-    if source.is_file():
-        if path_exists(target) and (
-            target.is_symlink() or target.is_dir()
-        ):
-            remove_path(target)
 
-        shutil.copy2(source, target)
-        return
+def render_instance_file_report(
+    source: Path,
+    target: Path,
+    base: Path | None,
+) -> tuple[str, int]:
+    """Report template changes to files that are never overwritten."""
+    if base is not None:
+        compared = base
+        heading = (
+            "Template changes since the last synchronized version "
+            f"(`{(target / TEMPLATE_VERSION).read_text().strip()}`)."
+        )
+    else:
+        compared = target
+        heading = (
+            "No previous synchronized version is recorded, so these are "
+            "all differences between this instance and the template."
+        )
 
-    raise ValueError(f"Unsupported source path type: {source}")
+    paths = sorted(
+        path
+        for path in repository_files(source) | repository_files(compared)
+        if path not in EXCLUDED_FROM_REPORT
+    )
+
+    sections: list[str] = []
+
+    for path in paths:
+        old = read_bytes(compared / path)
+        new = read_bytes(source / path)
+
+        if old == new:
+            continue
+
+        if old is None:
+            status = "added in template"
+        elif new is None:
+            status = (
+                "removed from template"
+                if base is not None
+                else "only in this instance"
+            )
+        else:
+            status = "changed"
+
+        sections.append(
+            f"### `{path}` — {status}\n\n"
+            "```diff\n"
+            f"{unified_diff(old, new, path)}"
+            "```\n"
+        )
+
+    lines = ["## Instance files to review manually", "", heading, ""]
+
+    if sections:
+        lines.append(
+            "These files were **not** changed. Port the parts you want "
+            "in a separate commit."
+        )
+        lines.append("")
+        lines.extend(sections)
+    else:
+        lines.append("No changes to review.")
+        lines.append("")
+
+    return "\n".join(lines), len(sections)
 
 
 def deploy_env_variable_names(path: Path) -> set[str]:
     """Read variable names without returning or displaying their values."""
     names: set[str] = set()
 
-    with path.open(
-        "r",
-        encoding="utf-8-sig",
-        newline=None,
-    ) as deploy_env:
+    with path.open("r", encoding="utf-8-sig") as deploy_env:
         for line in deploy_env:
             match = ENV_ASSIGNMENT_PATTERN.match(line)
 
@@ -114,160 +202,53 @@ def deploy_env_variable_names(path: Path) -> set[str]:
     return names
 
 
-def render_deploy_env_report(
-    missing_variables: list[str],
-    target_only_variables: list[str],
-) -> str:
-    """Create a Markdown report containing variable names only."""
-    lines = [
-        "## deploy.env compatibility",
-        "",
-    ]
+def render_deploy_env_report(source: Path, target: Path) -> str:
+    """Compare variable names only; values are never printed."""
+    source_variables = deploy_env_variable_names(source / DEPLOY_ENV)
+    target_variables = deploy_env_variable_names(target / DEPLOY_ENV)
 
-    if missing_variables:
-        lines.extend(
-            [
-                "### Manual action required",
-                "",
-                (
-                    "The target `deploy.env` is missing variables that exist "
-                    "in the selected source template:"
-                ),
-                "",
-            ]
-        )
-        lines.extend(
-            f"- `{variable_name}`"
-            for variable_name in missing_variables
-        )
-        lines.extend(
-            [
-                "",
-                (
-                    "Add and configure these variables manually in the "
-                    "target repository. Their values were not copied or "
-                    "displayed."
-                ),
-            ]
-        )
-    else:
+    missing = sorted(source_variables - target_variables)
+    target_only = sorted(target_variables - source_variables)
+
+    lines = ["## deploy.env variable names", ""]
+
+    if missing:
+        lines.append("Missing in this instance — add and configure manually:")
+        lines.append("")
+        lines.extend(f"- `{name}`" for name in missing)
+        lines.append("")
+
+    if target_only:
         lines.append(
-            "The target contains every variable name from the source "
-            "`deploy.env`."
+            "Only in this instance — no longer used by the template, "
+            "or intentional:"
         )
+        lines.append("")
+        lines.extend(f"- `{name}`" for name in target_only)
+        lines.append("")
 
-    if target_only_variables:
-        lines.extend(
-            [
-                "",
-                "### Target-only variables",
-                "",
-                (
-                    "These variables exist only in the target `deploy.env`. "
-                    "They were not removed:"
-                ),
-                "",
-            ]
-        )
-        lines.extend(
-            f"- `{variable_name}`"
-            for variable_name in target_only_variables
-        )
-        lines.extend(
-            [
-                "",
-                (
-                    "Review these names manually. They may be intentional "
-                    "instance-specific settings or variables that are no "
-                    "longer used by the template."
-                ),
-            ]
-        )
+    if not missing and not target_only:
+        lines.append("Same variable names as the template.")
+        lines.append("")
 
-    lines.extend(
-        [
-            "",
-            (
-                "Only variable names were compared. Variable values were "
-                "not printed."
-            ),
-            "",
-        ]
-    )
+    lines.append("Only variable names were compared; values were not printed.")
+    lines.append("")
 
     return "\n".join(lines)
 
 
-def report_deploy_env_compatibility(
-    source_deploy_env: Path,
-    target_deploy_env: Path,
-    github_summary: Path | None,
+def validate_directories(
+    source: Path,
+    target: Path,
+    base: Path | None,
 ) -> None:
-    """Report source and target variable-name differences."""
-    source_variables = deploy_env_variable_names(source_deploy_env)
-    target_variables = deploy_env_variable_names(target_deploy_env)
-
-    missing_variables = sorted(source_variables - target_variables)
-    target_only_variables = sorted(target_variables - source_variables)
-
-    if missing_variables:
-        print(
-            "WARNING: Target deploy.env is missing "
-            f"{len(missing_variables)} source variable(s):"
-        )
-
-        for variable_name in missing_variables:
-            print(f"WARNING: - {variable_name}")
-
-        if github_summary is not None:
-            joined_names = ", ".join(missing_variables)
-            print(
-                "::warning title=deploy.env action required::"
-                "Target deploy.env is missing source variables: "
-                f"{joined_names}"
-            )
-    else:
-        print(
-            "PASS: Target deploy.env contains every source variable name."
-        )
-
-    if target_only_variables:
-        print(
-            "INFO: Target deploy.env contains "
-            f"{len(target_only_variables)} target-only variable(s):"
-        )
-
-        for variable_name in target_only_variables:
-            print(f"INFO: - {variable_name}")
-
-    if github_summary is not None:
-        github_summary.parent.mkdir(parents=True, exist_ok=True)
-
-        with github_summary.open(
-            "a",
-            encoding="utf-8",
-            newline="\n",
-        ) as summary:
-            summary.write(
-                render_deploy_env_report(
-                    missing_variables,
-                    target_only_variables,
-                )
-            )
-
-
-def validate_directories(source: Path, target: Path) -> None:
     """Stop before changes when source or target is unsafe."""
-    if not source.is_dir():
-        raise ValueError(f"Source directory does not exist: {source}")
-
-    if not target.is_dir():
-        raise ValueError(f"Target directory does not exist: {target}")
+    for name, path in (("Source", source), ("Target", target)):
+        if not path.is_dir():
+            raise ValueError(f"{name} directory does not exist: {path}")
 
     if source == target:
-        raise ValueError(
-            "Source and target directories must be different."
-        )
+        raise ValueError("Source and target directories must be different.")
 
     if source in target.parents or target in source.parents:
         raise ValueError(
@@ -280,7 +261,7 @@ def validate_directories(source: Path, target: Path) -> None:
             "deploy.env is missing."
         )
 
-    if not path_exists(target / ".git"):
+    if not (target / ".git").exists():
         raise ValueError(
             "Target directory is not a Git checkout: .git is missing."
         )
@@ -288,120 +269,104 @@ def validate_directories(source: Path, target: Path) -> None:
     if not (target / DEPLOY_ENV).is_file():
         raise ValueError("Target deploy.env does not exist.")
 
+    if base is not None and not base.is_dir():
+        raise ValueError(f"Base directory does not exist: {base}")
+
 
 def synchronize(
     source: Path,
     target: Path,
+    source_sha: str,
+    base: Path | None = None,
     github_summary: Path | None = None,
 ) -> None:
-    """Synchronize shared files and preserve target-specific state."""
-    validate_directories(source, target)
+    validate_directories(source, target, base)
 
-    source_deploy_env = source / DEPLOY_ENV
-    target_deploy_env = target / DEPLOY_ENV
-    deploy_env_before = target_deploy_env.read_bytes()
+    deploy_env_before = (target / DEPLOY_ENV).read_bytes()
 
-    source_paths = repository_paths(source)
-    target_paths = repository_paths(target)
+    report, review_count = render_instance_file_report(source, target, base)
+    managed_changes = synchronize_managed_files(source, target)
 
-    removed_count = 0
-    copied_file_count = 0
+    (target / TEMPLATE_VERSION).write_text(f"{source_sha}\n", encoding="utf-8")
 
-    for relative_path, target_path in sorted(
-        target_paths.items(),
-        key=lambda item: len(item[0].parts),
-        reverse=True,
-    ):
-        if relative_path == DEPLOY_ENV:
-            continue
+    if (target / DEPLOY_ENV).read_bytes() != deploy_env_before:
+        raise RuntimeError("Target deploy.env changed during synchronization.")
 
-        if relative_path not in source_paths:
-            remove_path(target_path)
-            removed_count += 1
+    summary_lines = ["## Infrastructure files updated", ""]
 
-    for relative_path, source_path in sorted(
-        source_paths.items(),
-        key=lambda item: len(item[0].parts),
-    ):
-        if relative_path == DEPLOY_ENV:
-            continue
+    if managed_changes:
+        summary_lines.extend(f"- {change}" for change in managed_changes)
+    else:
+        summary_lines.append("Already up to date.")
 
-        copy_path(source_path, target / relative_path)
-
-        if source_path.is_file() or source_path.is_symlink():
-            copied_file_count += 1
-
-    if not target_deploy_env.is_file():
-        raise RuntimeError(
-            "Target deploy.env was removed during synchronization."
-        )
-
-    deploy_env_after = target_deploy_env.read_bytes()
-
-    if deploy_env_before != deploy_env_after:
-        raise RuntimeError(
-            "Target deploy.env changed during synchronization."
-        )
+    summary_lines.append("")
+    summary = "\n".join(summary_lines)
+    summary += "\n" + report + "\n" + render_deploy_env_report(source, target)
 
     print(
-        "PASS: Shared template files synchronized "
-        f"({copied_file_count} files copied, "
-        f"{removed_count} obsolete paths removed)."
+        f"PASS: {len(managed_changes)} infrastructure file change(s); "
+        f"{review_count} instance file(s) to review manually."
     )
     print("PASS: Target deploy.env remained byte-for-byte unchanged.")
-    print("PASS: Target .git history remained outside synchronization.")
 
-    report_deploy_env_compatibility(
-        source_deploy_env,
-        target_deploy_env,
-        github_summary,
-    )
+    if github_summary is not None:
+        github_summary.parent.mkdir(parents=True, exist_ok=True)
+
+        with github_summary.open("a", encoding="utf-8") as summary_file:
+            summary_file.write(summary)
+    else:
+        print()
+        print(summary)
 
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Synchronize instance-example files into an instance repository "
-            "while preserving deploy.env and .git."
+            "Update an instance repository's infrastructure files from "
+            "instance-example and report changes to instance-specific files."
         )
+    )
+    parser.add_argument(
+        "--source-sha",
+        required=True,
+        help="Commit of the source template, recorded in .template-version.",
+    )
+    parser.add_argument(
+        "--base-directory",
+        type=Path,
+        help=(
+            "Checkout of the template version recorded in the target's "
+            ".template-version, used to report template changes since then."
+        ),
     )
     parser.add_argument(
         "--github-summary",
         type=Path,
-        help=(
-            "Optional GitHub Actions step-summary file for the deploy.env "
-            "compatibility report."
-        ),
+        help="GitHub Actions step-summary file for the report.",
     )
-    parser.add_argument(
-        "source_directory",
-        type=Path,
-        help="Path to the checked-out instance-example source.",
-    )
-    parser.add_argument(
-        "target_directory",
-        type=Path,
-        help="Path to the checked-out target instance repository.",
-    )
+    parser.add_argument("source_directory", type=Path)
+    parser.add_argument("target_directory", type=Path)
     return parser.parse_args()
 
 
 def main() -> int:
     arguments = parse_arguments()
 
-    source = arguments.source_directory.resolve()
-    target = arguments.target_directory.resolve()
-    github_summary = (
-        arguments.github_summary.resolve()
-        if arguments.github_summary is not None
-        else None
-    )
-
     try:
         synchronize(
-            source,
-            target,
-            github_summary,
+            arguments.source_directory.resolve(),
+            arguments.target_directory.resolve(),
+            arguments.source_sha,
+            (
+                arguments.base_directory.resolve()
+                if arguments.base_directory is not None
+                else None
+            ),
+            (
+                arguments.github_summary.resolve()
+                if arguments.github_summary is not None
+                else None
+            ),
         )
     except Exception as error:
         print(f"ERROR: {error}", file=sys.stderr)

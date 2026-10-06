@@ -23,10 +23,11 @@ A product owner can update an existing instance repository from this public
 template by manually running the `Update from instance-example` workflow in the
 target repository.
 
-The workflow preserves the target's `deploy.env` and complete Git history. It
-compares `deploy.env` variable names and reports required manual configuration
-without displaying values. It creates a separate update branch and provides a
-link for creating a reviewed pull request. Pushing update branches, including
+The workflow overwrites only a fixed list of infrastructure files (workflows
+and scripts). Instance-specific files, including `deploy.env`, are never changed;
+the template's changes to them are shown as diffs to port manually. It compares
+`deploy.env` variable names without displaying values, creates a separate update
+branch, and provides a link for creating a reviewed pull request. Pushing update branches, including
 GitHub Actions workflow changes, uses a least-privilege GitHub App installed
 only on registered target repositories.
 

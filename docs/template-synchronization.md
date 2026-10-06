@@ -23,11 +23,12 @@ The workflow:
 
 1. checks out the target repository's current `main` branch;
 2. downloads the selected version of the public source template;
-3. copies shared template files into the target checkout;
-4. preserves the target repository's `deploy.env`;
-5. creates a normal commit on a separate update branch;
-6. pushes the update branch to the target repository;
-7. provides a GitHub comparison link.
+3. copies the managed infrastructure files into the target checkout;
+4. reports, but never changes, template changes to instance-specific files;
+5. records the source commit in `.template-version`;
+6. creates a normal commit on a separate update branch;
+7. pushes the update branch to the target repository;
+8. provides a GitHub comparison link.
 
 The product owner uses the comparison link to create a pull request through the
 GitHub website.
@@ -46,26 +47,10 @@ The source repository can be downloaded without a token because it is public.
 
 ## Choosing the source version
 
-When starting the workflow, the product owner provides a source reference.
+When starting the workflow, the product owner provides a source reference:
+an exact source commit SHA or a branch, normally `main`.
 
-The source reference can be:
-
-- a published release tag, such as `v1.2.0`;
-- an exact source commit SHA;
-- the `main` branch.
-
-### Published release tag
-
-Use a release tag for a stable and reproducible productive update.
-
-Example:
-
-```text
-v1.2.0
-```
-
-This ensures that the same template version can be reviewed and applied again
-later.
+`instance-example` is not tagged; its `main` branch is the current template.
 
 ### Exact commit SHA
 
@@ -88,9 +73,6 @@ main
 to synchronize the latest commit currently available on the source
 repository's `main` branch.
 
-The `main` branch and the latest published release are not necessarily the same
-version. A release tag is preferred for productive updates.
-
 ## Starting an update
 
 In the target repository:
@@ -99,7 +81,7 @@ In the target repository:
 2. Select **Actions**.
 3. Select **Update from instance-example**.
 4. Select **Run workflow**.
-5. Enter the required release tag, commit SHA, or branch in **Source ref**.
+5. Enter the required commit SHA or branch in **Source ref**.
 6. Select **Run workflow** again.
 7. Wait for the workflow to finish.
 8. Open the completed workflow run.
@@ -155,19 +137,49 @@ The synchronization process:
 
 All existing commits in the target repository remain unchanged.
 
-## Protected target files
+## Managed and instance-specific files
 
-The following target content is never synchronized from the source:
+Only these infrastructure files are managed. They are identical in every
+instance and are overwritten, added, or removed to match the source:
 
 ```text
-.git
-deploy.env
+.gitattributes
+.gitignore
+.github/workflows/deploy.yml
+.github/workflows/public-safety.yml
+.github/workflows/update-from-template.yml
+docs/template-synchronization.md
+scripts/check-public-safety.py
+scripts/render-config.py
+scripts/sync-template.py
+scripts/test-sync-template.py
+scripts/validate-config.py
 ```
 
-The workflow verifies that `deploy.env` remains unchanged.
+The list lives in `MANAGED_PATHS` in `scripts/sync-template.py`. The workflow
+runs the source template's copy of that script, so the list always matches the
+template version being synchronized.
 
-If `deploy.env` does not exist in the target repository root, synchronization
-stops with an error.
+Every other file is instance-specific, for example `deploy.env`,
+`orchestrator/instance_config/*`, `chatui/*` and the README files. The workflow
+never writes, adds, or deletes them. `.git` is never touched.
+
+The workflow verifies that `deploy.env` remains unchanged. If `deploy.env` does
+not exist in the target repository root, synchronization stops with an error.
+
+## Instance-file report
+
+The workflow summary shows a diff for every instance-specific file that the
+template changed. The product owner ports the wanted parts manually in a
+separate commit.
+
+`.template-version` records the source commit of the last synchronization.
+When it is present, the report shows only template changes since that commit,
+so the instance's own customizations do not appear as noise.
+
+When it is missing, as on the first synchronization of an existing instance,
+the report shows every difference between the instance and the template,
+including files that exist only in the instance.
 
 ## deploy.env compatibility report
 
@@ -193,28 +205,6 @@ them manually.
 The synchronization workflow never modifies `deploy.env`. Required variables
 and their correct values must be added manually through a separate reviewed
 configuration change.
-
-## Shared files
-
-All other files are treated as shared template files.
-
-The synchronization supports:
-
-- newly added files;
-- modified files;
-- renamed files;
-- deleted files;
-- new directories;
-- deleted directories;
-- file-to-directory changes;
-- directory-to-file changes;
-- symbolic links.
-
-A file that exists only in the target repository is proposed for deletion
-unless it is `.git` or `deploy.env`.
-
-Product owners must therefore review every generated comparison and pull
-request for unintended deletion of target-specific files.
 
 ## Authentication
 
@@ -305,17 +295,14 @@ The workflow does not request permission to approve or merge pull requests.
 New repositories created from the updated template receive the workflow and
 synchronization scripts automatically.
 
-An existing target repository must receive these files once through a reviewed
+An existing target repository must receive this file once through a reviewed
 pull request:
 
 ```text
 .github/workflows/update-from-template.yml
-scripts/sync-template.py
-scripts/test-sync-template.py
 ```
 
-The target repository should also receive the template's `.gitattributes`,
-`.gitignore`, and public-safety workflow changes.
+The first synchronization then adds the remaining managed files.
 
 Before running synchronization for the first time:
 
@@ -338,8 +325,7 @@ To enable another productive instance repository:
 1. add the repository to the GitHub App installation's selected repositories;
 2. install the synchronization files through a reviewed pull request;
 3. add the two required Actions secrets to the target repository;
-4. run the workflow manually with a published release tag or exact source
-   commit;
+4. run the workflow manually with `main` or an exact source commit;
 5. review the generated comparison and create a pull request;
 6. merge only after the target repository's required checks and review pass.
 
@@ -388,17 +374,14 @@ The synchronization tests run in the public-safety workflow.
 
 The tests cover:
 
-- modified shared files;
-- newly added shared files;
-- deleted shared files;
-- file and directory type changes;
-- copied workflow files;
-- unchanged `deploy.env`;
-- preservation of the target `.git` directory;
-- a second synchronization with no additional changes;
+- managed files copied, added, and removed;
+- instance-specific files never written, and reported;
+- a report limited to template changes when `.template-version` exists;
+- `.template-version` recorded;
+- unchanged `deploy.env` and target `.git` across repeated runs;
+- `deploy.env` variable names reported without values;
 - a missing target `deploy.env`;
-- identical source and target directories;
-- permission failures.
+- identical source and target directories.
 
 After the product owner creates the pull request, the target repository's normal
 pull-request checks also run.
@@ -410,8 +393,9 @@ Before merging, verify:
 - the requested source reference is correct;
 - the exact source commit belongs to the intended release or branch;
 - the target base commit is correct;
-- `deploy.env` has no changes;
-- no target-specific files are removed unintentionally;
+- only managed files and `.template-version` changed;
+- the instance-file report has been reviewed and wanted changes ported
+  separately;
 - no secrets or credentials appear in the changes;
 - all required checks pass;
 - the required reviewer approves the pull request.
@@ -425,8 +409,8 @@ Open the target repository's **Actions** page and select the failed
 
 ### Source reference not found
 
-Confirm that the entered release tag, commit SHA, or branch exists in the public
-source repository.
+Confirm that the entered commit SHA or branch exists in the public source
+repository.
 
 ### Missing deploy.env
 
@@ -459,10 +443,3 @@ Open the branch using the comparison link shown in the workflow summary.
 
 Review the existing branch, create its pull request, or delete the branch
 through GitHub before rerunning the same source version.
-
-### Target-specific file is proposed for deletion
-
-Do not merge the pull request until the file is reviewed.
-
-If the file must remain target-specific, the synchronization design must be
-updated to protect it explicitly.

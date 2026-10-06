@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Release tag, commit SHA, or branch to synchronize
+        description: Commit SHA or branch of instance-example to synchronize
         required: true
         default: main
         type: string
@@ -48,7 +48,7 @@ jobs:
           repository: ChaBo-Project/instance-example
           ref: ${{ inputs.source_ref }}
           path: source
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Record source and target versions
@@ -71,12 +71,49 @@ jobs:
           echo "INFO: Source commit: $source_sha"
           echo "INFO: Target base commit: $target_base_sha"
 
-      - name: Synchronize shared template files
+      # .template-version records the source commit of the last synchronization.
+      # Its checkout lets the report show only template changes since then.
+      - name: Prepare last synchronized template version
+        id: base
         shell: bash
         run: |
           set -euo pipefail
 
-          python3 target/scripts/sync-template.py \
+          base_sha=""
+
+          if [[ -f target/.template-version ]]; then
+            base_sha="$(tr -d '[:space:]' < target/.template-version)"
+          fi
+
+          if [[ -n "$base_sha" ]] &&
+             git -C source cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+            git -C source worktree add --detach "$PWD/base" "$base_sha"
+            echo "directory=base" >> "$GITHUB_OUTPUT"
+            echo "INFO: Last synchronized template commit: $base_sha"
+          else
+            echo "directory=" >> "$GITHUB_OUTPUT"
+            echo "INFO: No usable .template-version; comparing against the instance."
+          fi
+
+      # The source's own script is used so its list of managed files matches
+      # the template version being synchronized.
+      - name: Synchronize infrastructure files
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.versions.outputs.source_sha }}
+          BASE_DIRECTORY: ${{ steps.base.outputs.directory }}
+        run: |
+          set -euo pipefail
+
+          base_arguments=()
+
+          if [[ -n "$BASE_DIRECTORY" ]]; then
+            base_arguments=(--base-directory "$BASE_DIRECTORY")
+          fi
+
+          python3 source/scripts/sync-template.py \
+            --source-sha "$SOURCE_SHA" \
+            "${base_arguments[@]}" \
             --github-summary "$GITHUB_STEP_SUMMARY" \
             source \
             target
@@ -193,7 +230,8 @@ jobs:
             echo "- Update branch: \`$BRANCH_NAME\`"
             echo "- Branch already existed: \`$BRANCH_EXISTED\`"
             echo
-            echo "The target \`deploy.env\` was preserved."
+            echo "Only infrastructure files and \`.template-version\` were changed."
+            echo "Review the instance-file report above and port what you need."
             echo
             echo "### Next step"
             echo

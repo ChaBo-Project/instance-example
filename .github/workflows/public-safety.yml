@@ -20,6 +20,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Test template synchronization
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 scripts/test-sync-template.py
+
       - name: Check tracked files
         shell: bash
         run: |

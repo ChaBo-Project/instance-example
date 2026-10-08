@@ -31,45 +31,17 @@ Example format:
 The Dataset must contain the columns expected by the Qdrant initialization
 process, including the document ID, vector, and payload metadata.
 
-The workflow finds or creates a Hugging Face Collection that groups the three
-Spaces and the embeddings Dataset.
+### 2. Spaces and Collection
 
-If the token cannot create Collections, create it manually using the exact
-`HF_COLLECTION_TITLE`. Set `HF_COLLECTION_PRIVATE="false"` for a public
-Collection. The workflow stops with an explanation if the Collection is missing
-and cannot be created.
+The workflow creates the three Spaces and the Hugging Face Collection itself
+when they are missing (token permissions in step 3). The Collection is found by
+the exact `HF_COLLECTION_TITLE` under the organization of `CHATUI_HF_SPACE`,
+with visibility per `HF_COLLECTION_PRIVATE`.
+
+`HF_SPACES_PRIVATE` must remain set to `true`.
 
 The Hugging Face Collection is different from the Qdrant collection configured
 through `COLLECTION_NAME`.
-
-### 2. Create or verify the private backend Spaces
-
-The workflow checks these backend Spaces before configuration and deployment:
-
-1. Orchestrator Space
-2. Qdrant Space
-
-The repository IDs must match `ORCHESTRATOR_HF_SPACE` and `QDRANT_HF_SPACE`
-in `deploy.env`.
-
-If a Space exists, the workflow reuses it and enforces private visibility.
-
-If a Space is missing and `HF_TOKEN` has repository-creation permission, the
-workflow creates it automatically with Docker SDK and private visibility.
-
-If the token cannot create repositories, create each missing Space manually
-with:
-
-- The exact repository ID from `deploy.env`
-- Docker SDK
-- Private visibility
-- An empty repository
-- The Resource Group configured through `HF_RESOURCE_GROUP_ID`, when set
-
-The token must have read and write access to both Spaces. The workflow stops
-with an explanation if a Space is missing, inaccessible, or cannot be created.
-
-`HF_SPACES_PRIVATE` must remain set to `true`.
 
 ### 3. Create a fine-grained Hugging Face token
 
@@ -77,38 +49,44 @@ Create a fine-grained token under:
 
 `Hugging Face → Settings → Access Tokens`
 
-Select all three Space repositories:
+For the first deployment, use your own token. Select the organization that
+owns the Spaces and the inference resources and enable:
 
-- spaces/<organization>/<qdrant-space>
-- spaces/<organization>/<orchestrator-space>
-- spaces/<organization>/<chatui-space>
-
-For fully automatic creation, grant the token permission to create repositories
-and Collections in the target organization.
-
-When `HF_RESOURCE_GROUP_ID` is configured, the token owner must have permission
-to create and update resources inside that Enterprise Resource Group.
-
-If these creation permissions cannot be granted, manually create the private
-Orchestrator and Qdrant Spaces, the configured public or private ChatUI Space,
-and the Hugging Face Collection before running the workflow.
-
-In both modes, the token must have write access to the three Spaces and the
-Collection so the workflow can configure and update them.
-
-Enable these repository permissions:
-
-- `Read contents of selected repos`
-- `Write contents/settings of selected repos`
-
-Select the organization that owns the inference resources and enable:
-
+- `Write contents/settings of repos in selected orgs`
+- Collections read/write
 - `Make calls to Inference Providers on behalf of selected orgs`
 - `Make calls to Inference Endpoints in selected orgs`
 
 Do not enable organization settings, billing, or member-management permissions.
-Repository and Collection creation permissions are optional when all required
-Spaces and the Collection are created manually.
+
+The first run creates the three Spaces and the Collection and adds them and the
+embeddings Dataset to the Collection. If an item cannot be added, the run logs
+a warning and continues.
+
+Once the instance is live, an organization admin:
+
+1. Adds any items missing from the Collection.
+2. Moves the Spaces and the Collection into the instance's Resource Group, if
+   the organization uses Resource Groups.
+3. Creates a token on the organization's service account, scoped to this
+   instance:
+   - The three Space repositories: `Read contents of selected repos` and
+     `Write contents/settings of selected repos`
+   - The embeddings Dataset repository: `Read contents of selected repos`
+   - The organization: Collections read/write, `Make calls to Inference
+     Providers on behalf of selected orgs`, `Make calls to Inference Endpoints
+     in selected orgs`
+4. Replaces the `HF_TOKEN` GitHub Actions secret with the service-account token.
+5. Manually starts the `Deploy ChaBo instance` workflow from GitHub Actions,
+   selecting the branch containing the instance's deployment configuration.
+   Changing a GitHub Actions secret does not automatically trigger deployment.
+6. Waits for deployment to complete and verifies through ChatUI that ChaBo
+   retrieves documents and generates answers.
+7. Deletes the first deployment token only after successful verification
+   and confirming that no other application or separately configured secret
+   still uses it.
+
+Later runs reuse the existing Spaces and Collection and create nothing.
 
 If the organization requires token approval, wait until an organization
 administrator approves the token.
@@ -126,8 +104,7 @@ Create this required repository secret:
 
 The workflow uses `HF_TOKEN` to:
 
-- Find or create the private Orchestrator and Qdrant Spaces
-- Find or create the ChatUI Space with the configured visibility
+- Create or verify the three Spaces and enforce their configured visibility
 - Find or create the Hugging Face Collection
 - Push content to all three Hugging Face Spaces
 - Configure the ChatUI Space variable and secret
@@ -135,7 +112,7 @@ The workflow uses `HF_TOKEN` to:
 - Configure the Qdrant Space variables and secrets
 - Call the configured Hugging Face inference resources
 
-When `GENERATOR_PROVIDER="azure"`, also create a GitHub Actions repository
+When `[generator] PROVIDER = azure` in `params.override.cfg.template`, also create a GitHub Actions repository
 secret named `AZURE_API_KEY` containing the key for your Azure resource.
 
 The workflow checks that this secret is present and copies it to the
@@ -185,43 +162,62 @@ Edit `deploy.env` and fill in all required public values, including:
 - `CHATUI_URL`
 - `HF_COLLECTION_TITLE`
 - `HF_COLLECTION_PRIVATE`
-- `EMBEDDING_ENDPOINT_URL`
-- `RERANKER_ENDPOINT_URL`
 - `EMBEDDING_DATASET`
 - `COLLECTION_NAME`
 - `EMBEDDING_DIMENSION`
-- Generator settings
+
+Then edit `orchestrator/instance_config/params.override.cfg.template` and fill
+in the keys marked "Required": the embedding and reranker endpoints and the
+generator settings.
 
 Set `CHATUI_HF_SPACE_PRIVATE` to control the visibility of the ChatUI Space:
 
-- `"false"` creates or keeps the ChatUI Space public.
-- `"true"` creates or keeps the ChatUI Space private.
+- `"false"` keeps the ChatUI Space public.
+- `"true"` keeps the ChatUI Space private.
 
-The workflow applies this setting to both newly created and existing ChatUI
-Spaces. A private ChatUI requires users to sign in to Hugging Face and have
+The workflow enforces this setting on every run. A private ChatUI requires users to sign in to Hugging Face and have
 access to the Space.
 
 This setting is independent of `HF_COLLECTION_PRIVATE`. For example, the
 ChatUI Space can be private while the Hugging Face Collection remains public.
 Adding a private Space to a public Collection does not make the Space public.
 
-`HF_RESOURCE_GROUP_ID` is optional. Set it to the 24-character hexadecimal ID
-from the Hugging Face Enterprise Resource Group page when resources must be
-created inside that group.
-
-Leave it empty when the organization does not use Resource Groups or when the
-token has the required organization-wide permissions.
-
-`params.override.cfg.template` contains variable placeholders. The deployment
-workflow combines it with `deploy.env` and generates the final
-`params.override.cfg`.
+`params.override.cfg.template` holds the orchestrator pipeline settings, edited
+directly in the file. A few values shared with the workflow and the Qdrant Space
+(`QDRANT_URL`, `COLLECTION_NAME`, `FILTERABLE_FIELDS`) are `${...}` placeholders
+filled from `deploy.env`; leave those as they are. The deployment workflow
+renders the final `params.override.cfg` and validates it before making any
+Hugging Face changes.
 
 Do not edit or commit a generated `params.override.cfg`.
 
+#### Migrating an existing instance
+
+Older instances set the pipeline settings in `deploy.env`. After adopting the
+current `params.override.cfg.template`, values left in `deploy.env` are
+ignored. Move them:
+
+1. Copy each value from `deploy.env` into the template key below, then delete
+   the line from `deploy.env`:
+
+   | `deploy.env` | Template key |
+   |---|---|
+   | `EMBEDDING_ENDPOINT_URL`, `RERANKER_ENDPOINT_URL` | `[hf_endpoints]` `embedding_endpoint_url`, `reranker_endpoint_url` |
+   | `GENERATOR_PROVIDER`, `GENERATOR_MODEL`, `GENERATOR_MAX_TOKENS`, `GENERATOR_TEMPERATURE`, `GENERATOR_INFERENCE_PROVIDER`, `GENERATOR_ORGANIZATION` | `[generator]` `PROVIDER`, `MODEL`, `MAX_TOKENS`, `TEMPERATURE`, `INFERENCE_PROVIDER`, `ORGANIZATION` |
+   | `AZURE_ENDPOINT`, `CONTEXT_META_FIELDS`, `TITLE_META_FIELDS` | `[generator]` same names |
+   | `QUERY_REWRITER_ENABLED` | `[query_rewriter]` `enabled` |
+   | `QUERY_REWRITER_LLM_PROVIDER`, `_MODEL`, `_MAX_TOKENS`, `_TEMPERATURE`, `_INFERENCE_PROVIDER`, `_ORGANIZATION` | `[query_rewriter]` `llm_provider`, `llm_model`, `llm_max_tokens`, `llm_temperature`, `llm_inference_provider`, `llm_organization` |
+
+2. Delete `HF_RESOURCE_GROUP_ID`; Resource Groups are now assigned by an
+   organization admin (step 3).
+3. Keep `QDRANT_URL`, `COLLECTION_NAME` and `FILTERABLE_FIELDS` in `deploy.env`.
+4. Run the deployment workflow. It stops before any Hugging Face change if a
+   required template key is empty.
+
 The parameter template is based on the published ChaBo-Orchestrator
-`instance_config.example/params.override.cfg`. It keeps deployment-controlled
-values as `${...}` placeholders and leaves optional settings commented so the
-selected Orchestrator image remains the source of truth for defaults.
+`instance_config.example/params.override.cfg`. It leaves optional settings
+commented so the selected Orchestrator image remains the source of truth for
+defaults.
 
 `orchestrator/instance_config/prompt_overrides.md` is based on the published
 Orchestrator example. Leave its sections empty to use the framework defaults.
@@ -260,7 +256,8 @@ deployment. This release tag does not automatically follow newer releases.
 
 #### Choose the answer generator
 
-Configure the answer generator in section 5 of `deploy.env`.
+Configure the answer generator in the `[generator]` section of
+`params.override.cfg.template`.
 
 Both options keep ChatUI, Orchestrator and Qdrant on Hugging Face.
 Selecting Azure only changes where answers are generated; it does not
@@ -268,33 +265,31 @@ create Azure resources or deploy a model.
 
 | Setting | Hugging Face | Azure |
 |---|---|---|
-| `GENERATOR_PROVIDER` | `huggingface` | `azure` |
-| `GENERATOR_MODEL` | Hugging Face model repository ID | Exact Azure deployment name |
-| `GENERATOR_INFERENCE_PROVIDER` | For example, `nscale` | `none`; ignored by Azure |
-| `GENERATOR_ORGANIZATION` | Your Hugging Face billing organization | `none`; ignored by Azure |
+| `PROVIDER` | `huggingface` | `azure` |
+| `MODEL` | Hugging Face model repository ID | Exact Azure deployment name |
+| `INFERENCE_PROVIDER` | For example, `nscale` | Empty; ignored by Azure |
+| `ORGANIZATION` | Your Hugging Face billing organization | Empty; ignored by Azure |
 | `AZURE_ENDPOINT` | Empty | Azure API base URL ending in `/openai/v1/` |
 | Required GitHub secrets | `HF_TOKEN` | `HF_TOKEN` and `AZURE_API_KEY` |
 
 For Azure, the resource and model deployment must already exist.
 
 Update all provider-specific settings together. Changing
-`GENERATOR_PROVIDER` does not automatically replace the other values.
+`PROVIDER` does not automatically replace the other values.
 
 Embedding, reranking and query rewriting have separate configuration.
 Changing the answer generator does not change those services.
 
 #### Metadata settings
 
-- `CONTEXT_META_FIELDS`: metadata included in the context sent to the generator.
+- `CONTEXT_META_FIELDS` (`[generator]` in the template): metadata included in
+  the context sent to the generator.
   Default: `filename,project_id,document_source,document_type`.
-- `TITLE_META_FIELDS`: metadata displayed with generated answers.
-  Default: `filename,page`.
-- `FILTERABLE_FIELDS`: metadata used to filter document searches.
+- `TITLE_META_FIELDS` (`[generator]` in the template): metadata displayed with
+  generated answers. Default: `filename,page`.
+- `FILTERABLE_FIELDS` (`deploy.env`): metadata used to filter document searches.
   Leave empty to disable filtering. Enabling filters also requires matching
   entries in `instance.yaml` and filter LLM configuration in the template.
-
-The workflow applies the context and title defaults when their values
-are empty or missing.
 
 #### Apply and verify changes
 
@@ -319,21 +314,14 @@ IDs remain unchanged. Separate Git branches do not create separate instances.
 The workflow automatically configures the required Hugging Face Space settings.
 They do not need to be entered manually in the Hugging Face Space interface.
 
-When `HF_RESOURCE_GROUP_ID` is configured, newly created Spaces and Collections
-are assigned to that Resource Group.
-
-Existing Spaces and Collections are reused in their current Resource Group. The
-workflow does not move existing resources between Resource Groups.
-
 #### Orchestrator and Qdrant Spaces
 
 For each backend Space, the workflow:
 
 - Reuses the configured Space when it exists
-- Creates a private Docker Space when it is missing and the token permits creation
+- Creates a private Docker Space when it is missing
 - Enforces private visibility
-- Stops with manual-creation instructions when creation is not permitted
-- Stops if the token cannot read or update the Space
+- Stops with an explanation if the token cannot create, read, or update it
 
 `HF_SPACES_PRIVATE` must be `true`.
 
@@ -341,9 +329,7 @@ For each backend Space, the workflow:
 
 The workflow:
 
-- Reuses the configured ChatUI Space when it exists
-- Creates it automatically when it is missing and the token permits creation
-- Stops with manual-creation instructions when creation is not permitted
+- Reuses the configured ChatUI Space when it exists, or creates it when missing
 - Enforces the visibility configured through `CHATUI_HF_SPACE_PRIVATE`
 - Deploys the configured ChatUI image
 - Generates the `DOTENV_LOCAL` configuration
@@ -368,29 +354,20 @@ GitHub Actions secret exists. Otherwise, the deployment `HF_TOKEN` is used.
 The workflow searches under the organization from `CHATUI_HF_SPACE` for the
 exact title configured through `HF_COLLECTION_TITLE`.
 
-If the Collection exists, the workflow reuses it. If it is missing and the
-token permits Collection creation, the workflow creates it.
-
-If creation permission is unavailable, manually create the Collection with:
-
-- The exact title from `HF_COLLECTION_TITLE`
-- The organization from `CHATUI_HF_SPACE`
-- The visibility configured through `HF_COLLECTION_PRIVATE`
-- The Resource Group configured through `HF_RESOURCE_GROUP_ID`, when set
-
-The workflow adds:
+If the Collection is missing, the workflow creates it. It enforces the
+visibility configured through `HF_COLLECTION_PRIVATE` and adds:
 
 - The Orchestrator Space
 - The Qdrant Space
 - The ChatUI Space
 - The embeddings Dataset
 
-Existing items are not duplicated. The token must have write access to the
+Existing items are not duplicated. If an item cannot be added, the workflow
+logs a warning and continues; an admin can add it manually (step 3). The token must have write access to the
 Collection so its visibility and items can be updated.
 
-The workflow stops with an explanation if the Collection is missing and cannot
-be created, if multiple Collections have the same title, or if the token cannot
-update it.
+The workflow stops with an explanation if the Collection cannot be created,
+if multiple Collections have the same title, or if the token cannot update it.
 
 Adding private backend Spaces to a public Collection does not change the
 visibility of those Spaces.
@@ -461,12 +438,12 @@ headings empty to use the framework defaults.
 The `Deploy ChaBo instance` workflow performs these operations:
 
 1. Validates the required public configuration and GitHub secret.
-2. Finds or creates the private Orchestrator and Qdrant Spaces.
-3. Finds or creates the ChatUI Space with the configured visibility.
-4. Renders the ChatUI environment template and configures the resulting
+2. Generates `params.override.cfg` from `deploy.env` and
+   `params.override.cfg.template`, and validates it.
+3. Finds or creates the private Orchestrator and Qdrant Spaces.
+4. Finds or creates the ChatUI Space and enforces the configured visibility.
+5. Renders the ChatUI environment template and configures the resulting
    Space variable and required secret.
-5. Generates `params.override.cfg` from `deploy.env` and
-   `params.override.cfg.template`.
 6. Configures the Orchestrator Space secrets.
 7. Configures the selected Qdrant Space variables.
 8. Configures the Qdrant Space secrets, including fallback handling.
@@ -481,9 +458,10 @@ The following prerequisites remain manual:
 - Create or verify the embeddings Dataset.
 - Create a fine-grained Hugging Face token with write access to the deployment
   resources.
-- Either grant repository and Collection creation permissions or manually create
-  the three Spaces and Hugging Face Collection.
 - Add the token to GitHub Actions.
+- After the first run (admin): complete the Collection, move resources into
+  the Resource Group, and replace `HF_TOKEN` with a scoped service-account
+  token (step 3).
 - Complete the public values in `deploy.env`.
 - Optionally configure `instance.yaml`.
 - Start the workflow through GitHub Actions or merge the changes into a

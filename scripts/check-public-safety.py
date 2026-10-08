@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import configparser
 import os
 import re
 import subprocess
@@ -23,18 +24,26 @@ PUBLIC_VALUES_THAT_MUST_BE_EMPTY = (
     "QDRANT_HF_SPACE",
     "CHATUI_HF_SPACE",
     "HF_COLLECTION_TITLE",
-    "HF_RESOURCE_GROUP_ID",
     "INSTANCE_URL",
     "QDRANT_URL",
     "CHATUI_URL",
-    "EMBEDDING_ENDPOINT_URL",
-    "RERANKER_ENDPOINT_URL",
     "EMBEDDING_DATASET",
     "COLLECTION_NAME",
-    "GENERATOR_ORGANIZATION",
-    "AZURE_ENDPOINT",
-    "QUERY_REWRITER_LLM_ORGANIZATION",
 )
+
+PARAMS_TEMPLATE = Path(
+    "orchestrator/instance_config/params.override.cfg.template"
+)
+
+# Template keys that identify an organization or endpoint.
+# In the public template they must be empty or a ${...} placeholder.
+PUBLIC_TEMPLATE_KEYS_THAT_MUST_BE_EMPTY = {
+    "organization",
+    "llm_organization",
+    "azure_endpoint",
+}
+
+PLACEHOLDER = re.compile(r"\$\{[A-Z][A-Z0-9_]*\}")
 
 SECRET_PATTERNS = (
     (
@@ -117,6 +126,35 @@ def read_deploy_env() -> dict[str, str]:
     return values
 
 
+def check_params_template() -> None:
+    config = configparser.ConfigParser(interpolation=None, strict=True)
+
+    try:
+        config.read_string(
+            PARAMS_TEMPLATE.read_text(encoding="utf-8"),
+            source=str(PARAMS_TEMPLATE),
+        )
+    except (OSError, configparser.Error) as error:
+        errors.append(f"{PARAMS_TEMPLATE}: cannot parse: {error}")
+        return
+
+    for section in config.sections():
+        for key, value in config.items(section):
+            if (
+                key not in PUBLIC_TEMPLATE_KEYS_THAT_MUST_BE_EMPTY
+                and not key.endswith("endpoint_url")
+            ):
+                continue
+
+            value = value.strip()
+
+            if value and not PLACEHOLDER.fullmatch(value):
+                errors.append(
+                    f"{PARAMS_TEMPLATE}: [{section}] {key} must be "
+                    f"empty in the public template"
+                )
+
+
 for path in tracked_files():
     if (
         path.name in FORBIDDEN_FILENAMES
@@ -156,6 +194,8 @@ if PUBLIC_TEMPLATE_MODE:
                 f"deploy.env: {variable_name} must be empty in "
                 f"the public template"
             )
+
+    check_params_template()
 
 
 if errors:

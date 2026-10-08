@@ -177,6 +177,9 @@ jobs:
           source deploy.env
           set +a
 
+          # Optional: a missing FILTERABLE_FIELDS line renders as empty (filtering off).
+          export FILTERABLE_FIELDS="${FILTERABLE_FIELDS:-}"
+
           rendered_directory=".rendered/orchestrator/instance_config"
 
           mkdir -p "$rendered_directory"

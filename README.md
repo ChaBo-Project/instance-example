@@ -191,6 +191,29 @@ Hugging Face changes.
 
 Do not edit or commit a generated `params.override.cfg`.
 
+#### Migrating an existing instance
+
+Older instances set the pipeline settings in `deploy.env`. After adopting the
+current `params.override.cfg.template`, values left in `deploy.env` are
+ignored. Move them:
+
+1. Copy each value from `deploy.env` into the template key below, then delete
+   the line from `deploy.env`:
+
+   | `deploy.env` | Template key |
+   |---|---|
+   | `EMBEDDING_ENDPOINT_URL`, `RERANKER_ENDPOINT_URL` | `[hf_endpoints]` `embedding_endpoint_url`, `reranker_endpoint_url` |
+   | `GENERATOR_PROVIDER`, `GENERATOR_MODEL`, `GENERATOR_MAX_TOKENS`, `GENERATOR_TEMPERATURE`, `GENERATOR_INFERENCE_PROVIDER`, `GENERATOR_ORGANIZATION` | `[generator]` `PROVIDER`, `MODEL`, `MAX_TOKENS`, `TEMPERATURE`, `INFERENCE_PROVIDER`, `ORGANIZATION` |
+   | `AZURE_ENDPOINT`, `CONTEXT_META_FIELDS`, `TITLE_META_FIELDS` | `[generator]` same names |
+   | `QUERY_REWRITER_ENABLED` | `[query_rewriter]` `enabled` |
+   | `QUERY_REWRITER_LLM_PROVIDER`, `_MODEL`, `_MAX_TOKENS`, `_TEMPERATURE`, `_INFERENCE_PROVIDER`, `_ORGANIZATION` | `[query_rewriter]` `llm_provider`, `llm_model`, `llm_max_tokens`, `llm_temperature`, `llm_inference_provider`, `llm_organization` |
+
+2. Delete `HF_RESOURCE_GROUP_ID`; Resource Groups are now assigned by an
+   organization admin (step 3).
+3. Keep `QDRANT_URL`, `COLLECTION_NAME` and `FILTERABLE_FIELDS` in `deploy.env`.
+4. Run the deployment workflow. It stops before any Hugging Face change if a
+   required template key is empty.
+
 The parameter template is based on the published ChaBo-Orchestrator
 `instance_config.example/params.override.cfg`. It leaves optional settings
 commented so the selected Orchestrator image remains the source of truth for

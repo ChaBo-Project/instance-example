@@ -76,8 +76,15 @@ Once the instance is live, an organization admin:
    - The organization: Collections read/write, `Make calls to Inference
      Providers on behalf of selected orgs`, `Make calls to Inference Endpoints
      in selected orgs`
-4. Replaces the `HF_TOKEN` GitHub Actions secret with that token. The first
-   deployment token can then be deleted.
+4. Replaces the `HF_TOKEN` GitHub Actions secret with the service-account token.
+5. Manually starts the `Deploy ChaBo instance` workflow from GitHub Actions,
+   selecting the branch containing the instance's deployment configuration.
+   Changing a GitHub Actions secret does not automatically trigger deployment.
+6. Waits for deployment to complete and verifies through ChatUI that ChaBo
+   retrieves documents and generates answers.
+7. Deletes the first deployment token only after successful verification
+   and confirming that no other application or separately configured secret
+   still uses it.
 
 Later runs reuse the existing Spaces and Collection and create nothing.
 

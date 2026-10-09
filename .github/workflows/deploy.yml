@@ -121,6 +121,13 @@ jobs:
               ;;
           esac
 
+          # Optional, but the Qdrant Space fails to start on a non-integer value.
+          if [[ -n "${QDRANT_TIMEOUT:-}" && ! "$QDRANT_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+            errors+=(
+              "QDRANT_TIMEOUT must be a positive whole number of seconds, or empty."
+            )
+          fi
+
           if [[ -z "${HF_TOKEN:-}" ]]; then
             errors+=(
               "GitHub Actions secret HF_TOKEN is missing."
@@ -614,6 +621,31 @@ jobs:
                   value=os.environ[variable_name],
               )
               print(f"PASS: Configured Qdrant variable {variable_name}.")
+
+          # Optional: an empty value removes the variable, so a cleared
+          # FILTERABLE_FIELDS doesn't keep building indexes from a stale value.
+          optional_variable_names = (
+              "FILTERABLE_FIELDS",
+              "QDRANT_TIMEOUT",
+          )
+
+          space_variables = api.get_space_variables(repo_id=space)
+
+          for variable_name in optional_variable_names:
+              value = os.environ.get(variable_name, "")
+              if value:
+                  api.add_space_variable(
+                      repo_id=space,
+                      key=variable_name,
+                      value=value,
+                  )
+                  print(f"PASS: Configured Qdrant variable {variable_name}.")
+              elif variable_name in space_variables:
+                  api.delete_space_variable(
+                      repo_id=space,
+                      key=variable_name,
+                  )
+                  print(f"INFO: Removed empty Qdrant variable {variable_name}.")
           PY
 
       # Configure Qdrant runtime secrets.

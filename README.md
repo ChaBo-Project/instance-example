@@ -259,7 +259,7 @@ release used for Orchestrator, Qdrant, and ChatUI deployments.
 Example:
 
 ```bash
-CHABO_DEPLOY_REF="hf-spaces-v0.2.0"
+CHABO_DEPLOY_REF="hf-spaces-v0.2.1"
 ```
 
 Find available releases on the
@@ -307,6 +307,12 @@ Changing the answer generator does not change those services.
 - `FILTERABLE_FIELDS` (`deploy.env`): metadata used to filter document searches.
   Leave empty to disable filtering. Enabling filters also requires matching
   entries in `instance.yaml` and filter LLM configuration in the template.
+  The Qdrant Space also creates a payload index for each field, which keeps
+  filtered search fast on large collections. The declared type must match the
+  stored values: `int` only matches integers, `str` and `list` only strings.
+  Indexes require `CHABO_DEPLOY_REF` `hf-spaces-v0.2.1` or later; existing
+  instances must bump it manually, since template updates never change
+  `deploy.env`.
 
 #### Apply and verify changes
 
@@ -414,6 +420,11 @@ Qdrant Space:
 - `VECTOR_COLUMN_NAME`
 - `BATCH_SIZE`
 - `TOP_K`
+- `FILTERABLE_FIELDS`, when nonempty
+- `QDRANT_TIMEOUT`, when nonempty
+
+An empty optional value removes that variable from the Space, so clearing
+`FILTERABLE_FIELDS` stops index creation on the next restart.
 
 Only these selected values are added to the Qdrant Space settings. The workflow
 does not submit all values from `deploy.env` to Hugging Face.

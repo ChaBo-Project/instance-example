@@ -195,6 +195,12 @@ jobs:
             orchestrator/instance_config/instance.yaml \
             "$rendered_directory/instance.yaml"
 
+          if [ -f orchestrator/instance_config/prompt_overrides.md ]; then
+            cp \
+              orchestrator/instance_config/prompt_overrides.md \
+              "$rendered_directory/prompt_overrides.md"
+          fi
+
           python3 scripts/render-config.py \
             orchestrator/instance_config/params.override.cfg.template \
             "$rendered_directory/params.override.cfg"

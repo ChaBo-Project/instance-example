@@ -1,0 +1,5 @@
+# Default for this instance: cases.jsonl/cases.csv (real answer text + retrieved chunk text)
+# stay local-only. manifest.json/summary.json/runs.csv are NOT listed here - those are always
+# committed (no sensitive content). See eval/README.md.
+cases.jsonl
+cases.csv

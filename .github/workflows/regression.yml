@@ -1,0 +1,491 @@
+name: Orchestrator regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      orchestrator_sha:
+        description: "Full 40-character Orchestrator commit SHA to test"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: orchestrator-regression
+  cancel-in-progress: falseconcurrency:
+  group: chabo-instance-deployment
+  cancel-in-progress: false
+
+jobs:
+  configuration:
+    name: Check regression configuration
+    if: github.event.repository.private == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out instance configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Validate regression settings
+        shell: bash
+        env:
+          ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REGRESSION_READ_TOKEN: ${{ secrets.HF_REGRESSION_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          if [[ "${REGRESSION_ENABLED:-false}" != "true" ]]; then
+            echo "::error::Regression testing is disabled. Enable it only in a private test instance containing the synthetic documents."
+            exit 1
+          fi
+
+          if [[ ! "$ORCHESTRATOR_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Provide a full 40-character lowercase Orchestrator commit SHA."
+            exit 1
+          fi
+
+          if [[ ! "${REGRESSION_DATASET_REVISION:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::REGRESSION_DATASET_REVISION must be a full dataset commit SHA."
+            exit 1
+          fi
+
+          required_variables=(
+            ORCHESTRATOR_HF_SPACE
+            QDRANT_HF_SPACE
+            INSTANCE_URL
+            QDRANT_URL
+            EMBEDDING_DATASET
+            COLLECTION_NAME
+            HF_TOKEN
+            HF_REGRESSION_READ_TOKEN
+          )
+
+          missing=0
+
+          for variable_name in "${required_variables[@]}"; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              echo "::error::Missing required setting: $variable_name"
+              missing=1
+            fi
+          done
+
+          if (( missing > 0 )); then
+            exit 1
+          fi
+
+          if [[ "${HF_SPACES_PRIVATE:-}" != "true" ]]; then
+            echo "::error::HF_SPACES_PRIVATE must be true."
+            exit 1
+          fi
+
+          echo "PASS: Required regression settings are present."
+
+  build:
+    name: Build selected Orchestrator version
+    needs: configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out selected Orchestrator commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ChaBo-Project/ChaBo-Orchestrator
+          ref: ${{ inputs.orchestrator_sha }}
+          persist-credentials: false
+
+      - name: Verify commit and build Docker image
+        shell: bash
+        env:
+          ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha }}
+        run: |
+          set -euo pipefail
+
+          actual_sha="$(git rev-parse HEAD)"
+
+          if [[ "$actual_sha" != "$ORCHESTRATOR_SHA" ]]; then
+            echo "::error::Checked-out commit does not match the requested commit."
+            exit 1
+          fi
+
+          docker build \
+            --label "org.opencontainers.image.revision=$ORCHESTRATOR_SHA" \
+            --tag "chabo-regression:$ORCHESTRATOR_SHA" \
+            .
+
+      - name: Package verified source code
+        shell: bash
+        env:
+          ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha }}
+        run: |
+          set -euo pipefail
+
+          artifact_directory="$RUNNER_TEMP/regression-source"
+          mkdir -p "$artifact_directory"
+
+          git archive \
+            --format=tar \
+            --output="$artifact_directory/source.tar" \
+            "$ORCHESTRATOR_SHA"
+
+          printf '%s\n' "$ORCHESTRATOR_SHA" \
+            > "$artifact_directory/revision.txt"
+
+      - name: Save source code for deployment job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: regression-source
+          path: ${{ runner.temp }}/regression-source/
+          retention-days: 7
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy selected revision to test Space
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      space_sha: ${{ steps.upload.outputs.space_sha }}
+
+    steps:
+      - name: Check out instance configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Download verified source
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: regression-source
+          path: .regression-artifact
+
+      - name: Prepare deployment files
+        shell: bash
+        env:
+          ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha }}
+          AZURE_API_KEY: ${{ secrets.AZURE_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          test "$(cat .regression-artifact/revision.txt)" = "$ORCHESTRATOR_SHA"
+
+          set -a
+          source deploy.env
+          set +a
+
+          test "${REGRESSION_ENABLED:-false}" = "true"
+
+          python3 scripts/check-public-safety.py
+
+          mkdir -p .regression-source
+          tar -xf .regression-artifact/source.tar \
+            -C .regression-source
+
+          config_directory=".regression-source/instance_config"
+          mkdir -p "$config_directory"
+
+          cp orchestrator/instance_config/instance.yaml \
+            "$config_directory/instance.yaml"
+
+          if [[ -f orchestrator/instance_config/prompt_overrides.md ]]; then
+            cp orchestrator/instance_config/prompt_overrides.md \
+              "$config_directory/prompt_overrides.md"
+          fi
+
+          export FILTERABLE_FIELDS="${FILTERABLE_FIELDS:-}"
+
+          python3 scripts/render-config.py \
+            orchestrator/instance_config/params.override.cfg.template \
+            "$config_directory/params.override.cfg"
+
+          python3 scripts/validate-config.py \
+            "$config_directory/params.override.cfg"
+
+          python3 - <<'PY'
+          import configparser
+          import os
+          from pathlib import Path
+
+          source = Path(".regression-source")
+          sha = os.environ["ORCHESTRATOR_SHA"]
+          config_path = source / "instance_config/params.override.cfg"
+
+          config = configparser.ConfigParser(interpolation=None)
+          config.read(config_path)
+
+          if config.get("generator", "PROVIDER") != "huggingface":
+              raise RuntimeError(
+                  "This regression setup requires a Hugging Face generator."
+              )
+
+          # These tests check the OpenAI API's source references.
+          if not config.has_section("api"):
+              config.add_section("api")
+          config.set("api", "openai_citations", "true")
+
+          with config_path.open("w", encoding="utf-8") as output:
+              config.write(output)
+
+          with (source / "Dockerfile").open("a", encoding="utf-8") as output:
+              output.write(
+                  "\nWORKDIR /app\n"
+                  "COPY instance_config /app/instance_config\n"
+                  "ENV INSTANCE_CONFIG_DIR=/app/instance_config\n"
+                  f"LABEL org.opencontainers.image.revision={sha}\n"
+              )
+
+          (source / "README.md").write_text(
+              "---\n"
+              "title: ChaBo Regression Orchestrator\n"
+              "sdk: docker\n"
+              "app_port: 7860\n"
+              "---\n\n"
+              f"Orchestrator revision: {sha}\n",
+              encoding="utf-8",
+          )
+
+          (source / "regression-revision.txt").write_text(
+              sha + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Install deployment client
+        run: python3 -m pip install "huggingface_hub==2.1.1"
+
+      - name: Upload to private test Space
+        id: upload
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          ORCHESTRATOR_SHA: ${{ inputs.orchestrator_sha }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          python3 - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          space = os.environ["ORCHESTRATOR_HF_SPACE"]
+          qdrant_space = os.environ["QDRANT_HF_SPACE"]
+
+          if space == qdrant_space:
+              raise RuntimeError(
+                  "Orchestrator and Qdrant must use different Spaces."
+              )
+
+          info = api.space_info(space, timeout=30)
+          qdrant_info = api.space_info(qdrant_space, timeout=30)
+
+          if not info.private or not qdrant_info.private:
+              raise RuntimeError(
+                  "Both regression Spaces must already exist and be private."
+              )
+
+          commit = api.upload_folder(
+              repo_id=space,
+              repo_type="space",
+              folder_path=".regression-source",
+              delete_patterns=["*"],
+              parent_commit=info.sha,
+              commit_message=(
+                  "Regression deployment: "
+                  + os.environ["ORCHESTRATOR_SHA"]
+              ),
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"space_sha={commit.oid}\n")
+
+          print(f"Uploaded test Space commit: {commit.oid}")
+          PY
+
+  test:
+    name: Test deployed Orchestrator
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out instance configuration
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned regression tests
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ChaBo-Project/ChaBo-Orchestrator
+          ref: eccc750f598f4909b5cff7cf7bba4260ce9177e9
+          path: .regression-tests
+          persist-credentials: false
+
+      - name: Install test client
+        run: python3 -m pip install "huggingface_hub==2.1.1"
+
+      - name: Wait for uploaded revision
+        id: ready
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_REGRESSION_READ_TOKEN }}
+          EXPECTED_SPACE_SHA: ${{ needs.deploy.outputs.space_sha }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          python3 - <<'PY'
+          import os
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          from huggingface_hub import HfApi
+
+          token = os.environ["HF_TOKEN"]
+          expected = os.environ["EXPECTED_SPACE_SHA"]
+          space = os.environ["ORCHESTRATOR_HF_SPACE"]
+          health_url = os.environ["INSTANCE_URL"].rstrip("/") + "/health"
+
+          if not token or not expected:
+              raise RuntimeError("Missing read token or uploaded Space commit.")
+
+          api = HfApi(token=token)
+          deadline = time.monotonic() + 1200
+
+          while time.monotonic() < deadline:
+              info = api.space_info(space, timeout=30)
+
+              if not info.private:
+                  raise RuntimeError("The test Space must remain private.")
+
+              if info.sha != expected:
+                  raise RuntimeError("Another deployment changed the test Space.")
+
+              runtime = info.runtime
+              stage = runtime.stage if runtime else "UNKNOWN"
+              running_sha = runtime.raw.get("sha") if runtime else None
+
+              print(
+                  f"Stage: {stage}; runtime commit: {running_sha}",
+                  flush=True,
+              )
+
+              if stage in ("BUILD_ERROR", "RUNTIME_ERROR", "CONFIG_ERROR"):
+                  raise RuntimeError(f"Test deployment failed: {stage}")
+
+              if stage == "RUNNING" and running_sha == expected:
+                  request = Request(
+                      health_url,
+                      headers={"Authorization": f"Bearer {token}"},
+                  )
+
+                  try:
+                      with urlopen(request, timeout=30) as response:
+                          if response.status == 200:
+                              print("PASS: Uploaded revision is ready.")
+                              break
+                  except (HTTPError, URLError, TimeoutError):
+                      print("Health endpoint is not ready yet.", flush=True)
+
+              time.sleep(15)
+          else:
+              raise TimeoutError(
+                  "Uploaded revision was not ready within 20 minutes. "
+                  "Check the Space build logs and ensure Dev Mode is off."
+              )
+          PY
+
+      - name: Run regression suite
+        shell: bash
+        working-directory: .regression-tests
+        env:
+          HF_TOKEN: ${{ secrets.HF_REGRESSION_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source "$GITHUB_WORKSPACE/deploy.env"
+          set +a
+
+          export REGRESSION_ORCHESTRATOR_URL="$INSTANCE_URL"
+          export REGRESSION_QDRANT_URL="$QDRANT_URL"
+          export REGRESSION_COLLECTION="$COLLECTION_NAME"
+          export REGRESSION_DATASET_ID="$EMBEDDING_DATASET"
+
+          python3 - <<'PY'
+          import sys
+          import unittest
+
+          suite = unittest.defaultTestLoader.discover(
+              "tests/regression",
+              pattern="test_deployed_*.py",
+          )
+
+          count = suite.countTestCases()
+          if count < 13:
+              raise RuntimeError(
+                  f"Expected at least 13 tests; discovered {count}."
+              )
+
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+
+          if result.skipped:
+              print("ERROR: Required regression tests were skipped.")
+              sys.exit(1)
+
+          sys.exit(0 if result.wasSuccessful() else 1)
+          PY
+
+      - name: Verify deployment remained unchanged
+        if: always() && steps.ready.outcome == 'success'
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_REGRESSION_READ_TOKEN }}
+          EXPECTED_SPACE_SHA: ${{ needs.deploy.outputs.space_sha }}
+        run: |
+          set -euo pipefail
+
+          set -a
+          source deploy.env
+          set +a
+
+          python3 - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+
+          info = HfApi(token=os.environ["HF_TOKEN"]).space_info(
+              os.environ["ORCHESTRATOR_HF_SPACE"],
+              timeout=30,
+          )
+          expected = os.environ["EXPECTED_SPACE_SHA"]
+
+          if (
+              not info.private
+              or info.sha != expected
+              or info.runtime is None
+              or info.runtime.stage != "RUNNING"
+              or info.runtime.raw.get("sha") != expected
+          ):
+              raise RuntimeError(
+                  "The test deployment changed, stopped, "
+                  "or became public during testing."
+              )
+
+          print("PASS: Deployment remained private and unchanged.")
+          PY

@@ -499,3 +499,104 @@ The following prerequisites remain manual:
 - Optionally configure `instance.yaml`.
 - Start the workflow through GitHub Actions or merge the changes into a
   configured deployment branch.
+
+## Private regression testing
+
+The `Orchestrator regression` workflow checks a selected Orchestrator commit
+against a dedicated test deployment. It runs only in private GitHub
+repositories and must be started manually.
+
+### Use a separate test instance
+
+Create a separate private instance repository and separate Hugging Face
+Spaces for regression testing. Do not point this workflow at your production
+Orchestrator.
+
+The workflow replaces the files in the Orchestrator Space configured in
+`deploy.env`. It does not create the Spaces, configure their runtime secrets,
+or load the test documents into Qdrant.
+
+The tests require the synthetic Orion and Vega documents supplied with the
+Orchestrator regression suite. They will not work correctly against an
+arbitrary organisation dataset. Attachment tests supply their own fictional
+document.
+
+### Prepare the test deployment
+
+Before running the workflow:
+
+1. Prepare the synthetic embeddings dataset using the
+   [regression suite setup instructions](https://github.com/ChaBo-Project/ChaBo-Orchestrator/blob/eccc750f598f4909b5cff7cf7bba4260ce9177e9/tests/regression/README.md).
+   Use the same embedding model as the test Orchestrator.
+2. Configure and deploy the private test instance using the normal deployment
+   instructions. Both the Orchestrator and Qdrant Spaces must be private.
+3. Ensure Qdrant contains the synthetic documents in the configured collection.
+4. Configure the Hugging Face generator, embedding endpoint, and reranking
+   endpoint in `orchestrator/instance_config/params.override.cfg.template`.
+5. Turn off Hugging Face Dev Mode for the test Orchestrator.
+
+The current workflow requires a Hugging Face answer generator. It enables
+OpenAI-compatible citation output in the generated test configuration.
+
+### Configure the private repository
+
+In the private test repository's `deploy.env`, set:
+
+- `REGRESSION_ENABLED="true"`
+- `REGRESSION_DATASET_REVISION` to the full commit SHA of the prepared
+  Hugging Face embeddings dataset.
+
+The workflow also uses these existing settings:
+
+- `ORCHESTRATOR_HF_SPACE` and `QDRANT_HF_SPACE`
+- `INSTANCE_URL` and `QDRANT_URL`
+- `EMBEDDING_DATASET` and `COLLECTION_NAME`
+- `HF_SPACES_PRIVATE="true"`
+
+The URLs must belong to the corresponding test Spaces.
+
+Add these GitHub Actions secrets:
+
+- `HF_TOKEN`: a token with write access to the test Orchestrator Space and
+  enough access to inspect both private test Spaces.
+- `HF_REGRESSION_READ_TOKEN`: a token with access to read the synthetic
+  dataset and call both private test Spaces.
+
+These repository secrets do not replace the runtime secrets required by
+the deployed Spaces.
+
+Keep regression testing disabled and the dataset revision empty in the
+public template.
+
+### Run the tests
+
+1. Open **Actions** in your private test repository.
+2. Select **Orchestrator regression**.
+3. Select **Run workflow**.
+4. Enter the full 40-character Orchestrator commit SHA to test.
+5. Start the workflow.
+
+The workflow builds the selected code, uploads it to the test Orchestrator,
+waits for that exact deployment to start, and runs the regression suite.
+
+The test suite itself is pinned to a separate commit in `regression.yml`.
+Updating the application commit does not automatically update the tests.
+
+Deployment and regression workflows share a concurrency group so they
+cannot run simultaneously within the same repository.
+
+### Results and privacy
+
+Read results in the private repository's Actions run. Failed tests can
+include chatbot answers and source references in their logs.
+
+The workflow does not publish results to the public template or the public
+Orchestrator repository. Keep the repository private and do not copy
+sensitive logs into public issues or pull requests.
+
+### Existing private instances
+
+Run template synchronization to receive the workflow. Synchronization
+does not modify `deploy.env`; add the two regression settings manually.
+
+Enable regression testing only in a dedicated private test instance.

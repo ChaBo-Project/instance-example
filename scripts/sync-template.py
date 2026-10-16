@@ -28,6 +28,7 @@ MANAGED_PATHS = (
     Path(".github/workflows/deploy.yml"),
     Path(".github/workflows/public-safety.yml"),
     Path(".github/workflows/update-from-template.yml"),
+    Path(".github/workflows/regression.yml"),
     Path("docs/template-synchronization.md"),
     Path("scripts/check-public-safety.py"),
     Path("scripts/render-config.py"),
@@ -86,10 +87,10 @@ def synchronize_managed_files(source: Path, target: Path) -> list[str]:
             action = "updated" if target_path.exists() else "added"
             target_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_path, target_path)
-            changes.append(f"{action} `{relative_path}`")
+            changes.append(f"{action} `{relative_path.as_posix()}`")
         elif target_path.is_file():
             target_path.unlink()
-            changes.append(f"removed `{relative_path}`")
+            changes.append(f"removed `{relative_path.as_posix()}`")
 
     return changes
 
@@ -105,8 +106,8 @@ def unified_diff(old: bytes | None, new: bytes | None, path: Path) -> str:
         difflib.unified_diff(
             old_lines,
             new_lines,
-            fromfile=f"a/{path}",
-            tofile=f"b/{path}",
+            fromfile=f"a/{path.as_posix()}",
+            tofile=f"b/{path.as_posix()}",
         )
     )
 
@@ -166,7 +167,7 @@ def render_instance_file_report(
             status = "changed"
 
         sections.append(
-            f"### `{path}` — {status}\n\n"
+            f"### `{path.as_posix()}` — {status}\n\n"
             "```diff\n"
             f"{unified_diff(old, new, path)}"
             "```\n"

@@ -12,8 +12,6 @@ permissions:
   contents: read
 
 concurrency:
-  group: orchestrator-regression
-  cancel-in-progress: falseconcurrency:
   group: chabo-instance-deployment
   cancel-in-progress: false
 

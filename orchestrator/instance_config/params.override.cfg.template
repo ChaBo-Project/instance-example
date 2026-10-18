@@ -38,8 +38,8 @@ port = 443
 [retrieval]
 # Optional — uncomment and adjust any of these to override the base defaults;
 # safe to leave the whole section commented to inherit them as-is.
-# Hybrid retrieval: set hybrid_enabled = true together with SPARSE_MODEL in
-# deploy.env (the Qdrant Space then builds the BM25 vectors). sparse_model and
+# Hybrid retrieval: uncomment hybrid_enabled and set it to true, together with
+# SPARSE_MODEL in deploy.env (the Qdrant Space then builds the BM25 vectors). sparse_model and
 # sparse_language are read from the collection; the values below are a fallback.
 # top_k = 20
 # reranker_enabled = true

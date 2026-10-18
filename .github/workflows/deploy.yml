@@ -13,6 +13,10 @@ on:
       - "deploy.env"
       - ".github/workflows/deploy.yml"
 
+concurrency:
+  group: chabo-instance-deployment
+  cancel-in-progress: false
+
 jobs:
   deploy:
     if: github.repository != 'ChaBo-Project/instance-example'

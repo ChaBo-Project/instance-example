@@ -347,6 +347,12 @@ two variables to `deploy.env` themselves, since template updates never change
 `deploy.env`. Older orchestrators keep working, dense-only, against a hybrid
 collection. To turn hybrid off again, clear both settings.
 
+Hybrid is optional: with neither setting, nothing changes. When either is set, the
+workflow checks before deploying that they fit together: `hybrid_enabled = true`
+without `SPARSE_MODEL`, or with an older `CHABO_DEPLOY_REF` / `CHABO_TAG` release,
+fails; `SPARSE_MODEL` without `hybrid_enabled = true`, or a model other than
+`Qdrant/bm25`, only warns.
+
 #### Apply and verify changes
 
 Commit and push your changes, then start a new `Deploy ChaBo instance`

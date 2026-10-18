@@ -251,6 +251,14 @@ It is an editable starting point, not completed compliance text. Before
 deploying a real instance, review the complete file and replace the AI Act
 transparency placeholder with approved instance-specific information.
 
+For a custom logo, add `chatui/static/<name>/` and set `PUBLIC_APP_ASSETS=<name>`
+in `chatui/env.local.template`. The folder needs `logo.svg`, `favicon.ico`,
+`icon.svg`, `apple-touch-icon.png` and `icon-512x512.png`; copy ChaBo-ChatUI's
+`static/chabo-official/` as a starting point. A wrong name does not fail the
+deployment, the page just shows no logo: check that
+`<CHATUI_URL>/<name>/logo.svg` loads. Requires a `CHABO_DEPLOY_REF` of
+`hf-spaces-vX.Y.Z` or later.
+
 #### Deployment action version
 
 Set `CHABO_DEPLOY_REF` in `deploy.env` to select the ChaBo-Deploy

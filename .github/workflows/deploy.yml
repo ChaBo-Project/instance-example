@@ -191,15 +191,21 @@ jobs:
 
           mkdir -p "$rendered_directory"
 
-          cp \
-            orchestrator/instance_config/instance.yaml \
-            "$rendered_directory/instance.yaml"
+          # Copy every plain file, so a new one can't be silently left out.
+          # A *.template file without a render step below fails the run.
+          for path in orchestrator/instance_config/*; do
+            name="$(basename "$path")"
+            case "$name" in
+              params.override.cfg.template) ;;
+              *.template)
+                echo "ERROR: No render step for $path."
+                exit 1
+                ;;
+              *) cp -r "$path" "$rendered_directory/$name" ;;
+            esac
+          done
 
-          if [ -f orchestrator/instance_config/prompt_overrides.md ]; then
-            cp \
-              orchestrator/instance_config/prompt_overrides.md \
-              "$rendered_directory/prompt_overrides.md"
-          fi
+          test -f "$rendered_directory/instance.yaml"
 
           python3 scripts/render-config.py \
             orchestrator/instance_config/params.override.cfg.template \

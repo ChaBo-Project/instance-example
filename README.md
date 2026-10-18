@@ -327,6 +327,26 @@ Changing the answer generator does not change those services.
 - `QDRANT_TIMEOUT` (`deploy.env`): optional Qdrant search timeout in whole
   seconds. Leave empty to use the client default.
 
+#### Hybrid retrieval
+
+Hybrid retrieval adds BM25 keyword search to the dense vector search and fuses
+both result lists. It helps with exact terms such as project IDs, acronyms and
+names. Off by default. To turn it on:
+
+1. Set `SPARSE_MODEL="Qdrant/bm25"` in `deploy.env`, and `SPARSE_LANGUAGE` to
+   the corpus language (default `english`). Only `Qdrant/bm25` is tested.
+2. Set `hybrid_enabled = true` under `[retrieval]` in the template.
+3. Deploy. The Qdrant Space rebuilds the collection on restart with a BM25
+   vector per document and stores the BM25 settings on the collection; the
+   orchestrator reads them, so they don't need repeating in the template.
+
+Requires a `CHABO_DEPLOY_REF` with hybrid support (`hf-spaces-v0.3.0` or later)
+and `CHABO_TAG` `0.9.3` or later. With an older Qdrant Space the orchestrator
+stops at startup with a message to redeploy it. Existing instances must add the
+two variables to `deploy.env` themselves, since template updates never change
+`deploy.env`. Older orchestrators keep working, dense-only, against a hybrid
+collection. To turn hybrid off again, clear both settings.
+
 #### Apply and verify changes
 
 Commit and push your changes, then start a new `Deploy ChaBo instance`
@@ -435,6 +455,7 @@ Qdrant Space:
 - `TOP_K`
 - `FILTERABLE_FIELDS`, when nonempty
 - `QDRANT_TIMEOUT`, when nonempty
+- `SPARSE_MODEL` and `SPARSE_LANGUAGE`, when nonempty
 
 An empty optional value removes that variable from the Space, so clearing
 `FILTERABLE_FIELDS` stops index creation on the next restart.

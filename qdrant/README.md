@@ -53,6 +53,11 @@ key `app.py` uses for `query_points` instead of the admin key.
   when nonempty in `deploy.env`; an empty value removes it from the Space.
 - `QDRANT_TIMEOUT` (default: qdrant-client's) — search timeout in seconds, whole
   number. Sent only when nonempty in `deploy.env`.
+- `SPARSE_MODEL` (default empty = dense-only) / `SPARSE_LANGUAGE` (default `english`) —
+  hybrid retrieval: builds the collection with a named `dense` vector plus a BM25 `sparse`
+  vector from each payload's `text`, and stores these settings in the collection metadata
+  for the orchestrator. Only `Qdrant/bm25` is tested. Needs a ChaBo-Deploy ref with hybrid
+  support. Sent only when nonempty in `deploy.env`.
 
 On boot, `initialize_qdrant.py` checks whether `COLLECTION_NAME` already exists; if not,
 it pulls the full dataset from `EMBEDDING_DATASET` and

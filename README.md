@@ -257,7 +257,7 @@ in `chatui/env.local.template`. The folder needs `logo.svg`, `favicon.ico`,
 `static/chabo-official/` as a starting point. A wrong name does not fail the
 deployment, the page just shows no logo: check that
 `<CHATUI_URL>/<name>/logo.svg` loads. Requires a `CHABO_DEPLOY_REF` of
-`hf-spaces-vX.Y.Z` or later.
+`hf-spaces-v0.3.0` or later.
 
 #### Deployment action version
 
@@ -267,7 +267,7 @@ release used for Orchestrator, Qdrant, and ChatUI deployments.
 Example:
 
 ```bash
-CHABO_DEPLOY_REF="hf-spaces-v0.2.1"
+CHABO_DEPLOY_REF="hf-spaces-v0.3.0"
 ```
 
 Find available releases on the
@@ -346,6 +346,12 @@ stops at startup with a message to redeploy it. Existing instances must add the
 two variables to `deploy.env` themselves, since template updates never change
 `deploy.env`. Older orchestrators keep working, dense-only, against a hybrid
 collection. To turn hybrid off again, clear both settings.
+
+When turning hybrid on for a running instance, the orchestrator may restart
+before the Qdrant Space has rebuilt the collection, find no BM25 vector and
+stop with `has no sparse vector named 'sparse'`. Wait until the Qdrant Space
+log shows `Marked collection ... as completely indexed`, then restart the
+Orchestrator Space.
 
 Hybrid is optional: with neither setting, nothing changes. When either is set, the
 workflow checks before deploying that they fit together: `hybrid_enabled = true`

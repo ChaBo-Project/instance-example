@@ -639,6 +639,8 @@ jobs:
           optional_variable_names = (
               "FILTERABLE_FIELDS",
               "QDRANT_TIMEOUT",
+              "SPARSE_MODEL",
+              "SPARSE_LANGUAGE",
           )
 
           space_variables = api.get_space_variables(repo_id=space)

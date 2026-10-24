@@ -69,6 +69,9 @@ CONTEXT_META_FIELDS = filename,project_id,document_source,document_type
 INFERENCE_PROVIDER =
 # Required when PROVIDER is huggingface. Your Hugging Face billing organization.
 ORGANIZATION =
+# Optional: extra chat-template variables as a JSON object (huggingface/openai/azure only).
+# E.g. turn off reasoning ("thinking") on Qwen3-style models, which cuts time to first token:
+# CHAT_TEMPLATE_KWARGS = {"enable_thinking": false}
 
 # Metadata fields displayed with generated answers.
 TITLE_META_FIELDS = filename,page
@@ -112,6 +115,7 @@ filterable_fields = ${FILTERABLE_FIELDS}
 # llm_temperature = 0.1
 # llm_inference_provider = <required for huggingface>
 # llm_organization = <required for huggingface
+# llm_chat_template_kwargs = {"enable_thinking": false}
 
 [query_rewriter]
 # Required: true or false.
@@ -129,6 +133,8 @@ llm_temperature = 0.1
 # Required when enabled = true and llm_provider is huggingface.
 llm_inference_provider =
 llm_organization =
+# Optional (huggingface/openai/azure only), e.g. turn off reasoning on Qwen3-style models:
+# llm_chat_template_kwargs = {"enable_thinking": false}
 
 # Query-rewriter grounding is configured in instance.yaml under db_context.
 
@@ -144,6 +150,7 @@ enabled = false
 # llm_temperature = 0.0
 # llm_inference_provider = <required for huggingface>
 # llm_organization = <required for huggingface>
+# llm_chat_template_kwargs = {"enable_thinking": false}
 # block_controversial = false
 # timeout_s = 2.0
 # blocked_message = I'm sorry, but I can't help with that request.
@@ -160,6 +167,7 @@ classification_enabled = false
 # llm_temperature = 0.0
 # llm_inference_provider = <required for huggingface>
 # llm_organization = <required for huggingface>
+# llm_chat_template_kwargs = {"enable_thinking": false}
 # window_chars = 200
 # block_controversial = true
 # timeout_s = 5.0

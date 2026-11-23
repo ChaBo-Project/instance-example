@@ -134,8 +134,8 @@ def check_params_template() -> None:
             PARAMS_TEMPLATE.read_text(encoding="utf-8"),
             source=str(PARAMS_TEMPLATE),
         )
-    except (OSError, configparser.Error) as error:
-        errors.append(f"{PARAMS_TEMPLATE}: cannot parse: {error}")
+    except (OSError, configparser.Error):
+        errors.append(f"{PARAMS_TEMPLATE}: cannot read or parse template")
         return
 
     for section in config.sections():
@@ -170,13 +170,12 @@ for path in tracked_files():
     except UnicodeDecodeError:
         continue
 
-    for description, pattern in SECRET_PATTERNS:
+    for _, pattern in SECRET_PATTERNS:
         for match in pattern.finditer(content):
             errors.append(
                 f"{path}:{line_number(content, match.start())}: "
-                f"possible {description}"
+                "possible credential"
             )
-
 
 if PUBLIC_TEMPLATE_MODE:
     deploy_values = read_deploy_env()

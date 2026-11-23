@@ -13,6 +13,9 @@ on:
       - "deploy.env"
       - ".github/workflows/deploy.yml"
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
     if: github.repository != 'ChaBo-Project/instance-example'
